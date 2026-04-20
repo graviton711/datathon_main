@@ -29,3 +29,15 @@ To ensure consistency, reproducibility, and smooth transitions between sessions,
 - **Baseline Commit**: Initial project structure and venv setup must be committed immediately.
 - **Score Improvement**: A Git commit MUST be made every time a modeling change or feature addition results in a verified improvement in the leaderboard score or CV metric.
 - **Commit Messages**: Use descriptive messages, including the metric improvement (e.g., `feat: Add lag features, MAE improved from 850k to 820k`).
+
+## 7. CV-Leaderboard Alignment
+- **Cross-Validation**: Internal CV performance is the primary metric. Never report a Leaderboard improvement that isn't backed by a statistically significant CV improvement.
+- **Goal**: Minimize overfitting to the public leaderboard.
+
+## 8. Feature Tracing & Rationale
+- **Documentation**: Every new feature added to `src/features/` must have a documented rationale (business logic or data pattern).
+- **Goal**: Avoid feature inflation and maintain interpretability.
+
+## 9. Baseline First
+- **Benchmarking**: Always establish a simple baseline (e.g., Naive mean or Linear Regression) before moving to advanced algorithms (GBDTs).
+- **Goal**: Measure the real value-add of complexity.

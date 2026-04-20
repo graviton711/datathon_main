@@ -18,6 +18,12 @@ class Config:
     # Model Parameters
     RANDOM_STATE = 42
     TEST_SIZE = 0.2
+    TWEEDIE_VARIANCE_POWER = 1.5  # Optimal for revenue-like data
+    
+    # Regime & Calibration
+    REGIME_THRESHOLD_DATE = "2019-01-01"
+    CALIBRATION_WINDOW_DAYS = 180
+    TIME_DECAY_LMBDA = 0.001  # Decay rate for sample weights
     
     # Time Series Params
     START_DATE = "2012-07-04"

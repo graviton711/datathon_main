@@ -10,3 +10,8 @@ pyyaml
 python-dotenv
 ipykernel
 tqdm
+pyarrow
+fastparquet
+nbformat
+ipywidgets
+kaleido
