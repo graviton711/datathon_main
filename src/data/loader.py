@@ -1,7 +1,9 @@
 import pandas as pd
 import numpy as np
 from src.config import config
-from src.utils.logger import logger
+from src.utils.logger import setup_logger
+
+logger = setup_logger("loader")
 
 class DataLoader:
     def __init__(self):
@@ -27,7 +29,6 @@ class DataLoader:
         daily_traffic = df.groupby('date').agg({
             'sessions': 'sum',
             'unique_visitors': 'sum',
-            'conversion_rate': 'mean',
             'bounce_rate': 'mean'
         }).reset_index()
         daily_traffic.rename(columns={'date': 'Date'}, inplace=True)
