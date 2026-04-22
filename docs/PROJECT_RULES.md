@@ -51,3 +51,17 @@ To ensure consistency, reproducibility, and smooth transitions between sessions,
 - **Fixed Output Name**: The production submission file MUST always be named `submission.csv` in the `submissions/` directory. Avoid suffixing filenames with timestamps or versions unless explicitly requested.
 - **Minimalism**: Ruthlessly avoid creating unnecessary files. If a temporary script is needed for testing, use the `scratch/` directory and ensure it is cleaned up or documented.
 - **Single Source of Truth**: Keep logic in the core pipeline scripts (`builder.py`, `pipeline.py`) rather than scattering it across multiple experimental scripts.
+
+## 12. Execution Commands (Pipeline & Evaluation)
+To ensure everyone is running the exact same entry points, use the following commands from the root directory (`e:/VSCODE_WORKSPACE/NewDatathon/`):
+- **To Run Evaluation (Walk-Forward CV):**
+  ```bash
+  python src/evaluation/evaluate.py
+  ```
+  *(This will train on past data and evaluate on 2021-2022 to provide the Total MAE score without data leakage).*
+
+- **To Generate Production Submission:**
+  ```bash
+  python -m src.training.pipeline
+  ```
+  *(This trains the `ForecastingPipeline` on ALL available data up to 2022 and predicts the 2023-2024 horizon, outputting to `submissions/submission.csv`).*

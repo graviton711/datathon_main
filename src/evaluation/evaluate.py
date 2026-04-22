@@ -23,22 +23,21 @@ def run_walk_forward_validation():
     raw_sales = pd.read_parquet(Config.SALES_TRAIN_FILE)
     raw_sales['Date'] = pd.to_datetime(raw_sales['Date'])
     
-    # Define folds (Expanding Window)
+    # Define folds (Match Baseline Evaluation: Tail 2021-2022)
+    # Train <= 2020, Test = 2021-2022
     folds = [
-        {'train_max_year': 2019, 'test_year': 2020},
-        {'train_max_year': 2020, 'test_year': 2021},
-        {'train_max_year': 2021, 'test_year': 2022}
+        {'train_max_year': 2020, 'test_start': 2021, 'test_end': 2022}
     ]
     
     fold_metrics = []
 
     for i, fold in enumerate(folds):
         fold_num = i + 1
-        print(f"\n--- Fold {fold_num}: Train <= {fold['train_max_year']} | Test = {fold['test_year']} ---")
+        print(f"\n--- Fold {fold_num}: Train <= {fold['train_max_year']} | Test = {fold['test_start']}-{fold['test_end']} ---")
         
         train_end_date = pd.to_datetime(f"{fold['train_max_year']}-12-31")
-        test_start_date = pd.to_datetime(f"{fold['test_year']}-01-01")
-        test_end_date = pd.to_datetime(f"{fold['test_year']}-12-31")
+        test_start_date = pd.to_datetime(f"{fold['test_start']}-01-01")
+        test_end_date = pd.to_datetime(f"{fold['test_end']}-12-31")
         
         # Split data
         train_df = raw_sales[raw_sales['Date'] <= train_end_date].copy()
@@ -65,38 +64,31 @@ def run_walk_forward_validation():
         mae_cogs = mean_absolute_error(test_df['COGS'], test_df['p_COGS'])
         mape_cogs = mean_absolute_percentage_error(test_df['COGS'], test_df['p_COGS'])
         
-        # Weighted MAE: Revenue (40%) + COGS (60%)
-        weighted_mae = (0.4 * mae_rev) + (0.6 * mae_cogs)
+        # Total MAE: Sum of Revenue MAE and COGS MAE
+        total_mae = mae_rev + mae_cogs
         
         metrics = {
             'Fold': fold_num,
-            'Test_Year': fold['test_year'],
+            'Test_Period': f"{fold['test_start']}-{fold['test_end']}",
             'MAE_Rev': mae_rev,
             'MAPE_Rev': mape_rev,
             'MAE_COGS': mae_cogs,
             'MAPE_COGS': mape_cogs,
-            'Weighted_MAE': weighted_mae
+            'Total_MAE': total_mae
         }
         fold_metrics.append(metrics)
         
         print(f"Metrics for Fold {fold_num}:")
         print(f"  Revenue MAE : {mae_rev:,.0f} (MAPE: {mape_rev:.1f}%)")
         print(f"  COGS MAE    : {mae_cogs:,.0f} (MAPE: {mape_cogs:.1f}%)")
-        print(f"  Weighted MAE: {weighted_mae:,.0f}")
+        print(f"  TOTAL MAE   : {total_mae:,.0f}")
 
     # Summary
     print("\n=== Validation Summary ===")
     df_metrics = pd.DataFrame(fold_metrics)
-    print(df_metrics[['Fold', 'Test_Year', 'MAE_Rev', 'MAE_COGS', 'Weighted_MAE']].to_string(index=False))
+    print(df_metrics[['Fold', 'Test_Period', 'MAE_Rev', 'MAE_COGS', 'Total_MAE']].to_string(index=False))
     
-    # Focus heavily on the most recent fold (2022) and moderately on 2021
-    if len(df_metrics) == 3:
-        w_scores = df_metrics['Weighted_MAE'].values
-        # Custom weighting: 50% for Fold 3 (2022), 30% for Fold 2 (2021), 20% for Fold 1 (2020)
-        final_score = (w_scores[0]*0.2) + (w_scores[1]*0.3) + (w_scores[2]*0.5)
-        print(f"\nFinal Aggregated Score (Weighted by Recency): {final_score:,.0f}")
-    else:
-        print(f"\nAverage Weighted MAE: {df_metrics['Weighted_MAE'].mean():,.0f}")
+    print(f"\nFinal Aggregated Score (Total MAE): {df_metrics['Total_MAE'].mean():,.0f}")
 
 if __name__ == "__main__":
     run_walk_forward_validation()

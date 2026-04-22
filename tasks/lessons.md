@@ -13,5 +13,10 @@
 ## Workflow
 - **File Management**: Avoid creating multiple experiment files. Consolidate logic into the main `builder.py` and `pipeline.py` to maintain a single source of truth.
 
+## Strategic Benchmarks
+- **Current Best Benchmark**: **750k MAE** (Target for stability).
+- **Ultimate Goal (Top 1)**: **610k MAE** (Target for winning).
+
 ## Modeling Philosophy
 - **Model-Centric vs. Heuristics**: Avoid "code chay" (hardcoded multipliers like `expected_market_lift *= 1.50`). Instead, provide the model with explicit contextual flags (`is_pre_tet`) and interaction terms (`tet_x_payday`). This allows the model to learn the true weights from the data distribution rather than relying on human-enforced overrides, ensuring better generalization to future data.
+- **Natural Scaling**: Scaling to 2024 must be grounded in fundamental drivers (Traffic * CR * AOV). If a higher growth is needed to match the benchmark, it should be explained by the compounding of these drivers (e.g. CR improving over time) rather than arbitrary constants.
