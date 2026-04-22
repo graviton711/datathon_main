@@ -2,33 +2,40 @@ import os
 from pathlib import Path
 
 class Config:
-    # Paths
-    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    # Project Paths
+    PROJECT_ROOT = Path("e:/VSCODE_WORKSPACE/NewDatathon")
     DATA_DIR = PROJECT_ROOT / "data"
     RAW_DATA_DIR = DATA_DIR / "raw"
     PROCESSED_DATA_DIR = DATA_DIR / "processed"
-    MODELS_DIR = PROJECT_ROOT / "models"
-    SUBMISSIONS_DIR = PROJECT_ROOT / "submissions"
-    LOGS_DIR = PROJECT_ROOT / "logs"
+    MODEL_DIR = PROJECT_ROOT / "models"
+    SUBMISSION_DIR = PROJECT_ROOT / "submissions"
+    LOG_DIR = PROJECT_ROOT / "logs"
 
     # Files
-    SALES_TRAIN = RAW_DATA_DIR / "sales.csv"
-    SALES_TEST = RAW_DATA_DIR / "sample_submission.csv"
+    SALES_TRAIN_FILE = PROCESSED_DATA_DIR / "sales.parquet"
     
-    # Model Parameters
-    RANDOM_STATE = 42
-    TEST_SIZE = 0.2
-    TWEEDIE_VARIANCE_POWER = 1.5  # Optimal for revenue-like data
+    # Festive & Seasonality Definitions
+    TET_PRE_WINDOW = 14
+    TET_HOLIDAY_WINDOW = 6
+    MEGA_SALE_MONTHS = [3, 4, 5, 6, 8, 11, 12] 
     
-    # Regime & Calibration
-    REGIME_THRESHOLD_DATE = "2019-01-01"
-    CALIBRATION_WINDOW_DAYS = 180
-    TIME_DECAY_LMBDA = 0.001  # Decay rate for sample weights
-    
-    # Time Series Params
-    START_DATE = "2012-07-04"
-    TRAIN_END_DATE = "2022-12-31"
-    TEST_START_DATE = "2023-01-01"
-    TEST_END_DATE = "2024-07-01"
+    # Calibration
+    CALIBRATION_WINDOW_DAYS = 90
 
-config = Config()
+    # Core Model Hyperparameters
+    LGBM_NUM_LEAVES = 31
+    LGBM_LR = 0.02
+    LGBM_N_ESTIMATORS = 2000
+    TWEEDIE_VARIANCE_POWER = 1.4
+    
+    # Target and Features
+    DATE_COL = "Date"
+    
+    @classmethod
+    def initialize_dirs(cls):
+        for dir_path in [cls.MODEL_DIR, cls.SUBMISSION_DIR, cls.LOG_DIR]:
+            os.makedirs(dir_path, exist_ok=True)
+
+if __name__ == "__main__":
+    Config.initialize_dirs()
+    print("Project directories initialized.")

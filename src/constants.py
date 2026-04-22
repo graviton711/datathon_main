@@ -1,33 +1,17 @@
-# Feature names and constant mappings
+# Time Series Constants
+REGIME_BREAK_2019 = "2019-01-01"
 
-TARGET_COL = "Revenue"
-DATE_COL = "Date"
+# Feature Groups
+TEMPORAL_FEATURES = [
+    "year", "month", "day", "day_of_week", "day_of_year", 
+    "week_of_year", "quarter", "is_weekend", "is_month_start", "is_month_end"
+]
 
 CATEGORICAL_COLS = [
-    "category",
-    "segment",
-    "size",
-    "color",
-    "city",
-    "region",
-    "gender",
-    "age_group",
-    "acquisition_channel",
-    "traffic_source",
+    "Category", "Segment", "region"
 ]
 
-NUMERICAL_COLS = [
-    "price",
-    "cogs",
-    "quantity",
-    "stock_on_hand",
-    "page_views",
-    "sessions",
-]
-
-# Regional mappings if needed
-REGION_MAPPING = {
-    "West": 0,
-    "Central": 1,
-    "East": 2
-}
+# Competition specific
+TEST_START_DATE = "2023-01-01"
+TEST_END_DATE = "2024-07-01"
+FORECAST_HORIZON_DAYS = 548

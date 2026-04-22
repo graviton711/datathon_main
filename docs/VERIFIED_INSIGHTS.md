@@ -20,11 +20,6 @@ This file preserves all statistically verified findings and business insights di
 | 2026-04-20 | Demographic Gap: 55+ Desktop vs Under-35 Mobile. | Sunburst of `Age` -> `Gender` -> `Device`. | Tiered UI strategy: Mobile-first for young, Desktop-optimized for seniors. |
 | 2026-04-20 | Seasonality: Strong Q4 spikes (Holiday effect). | Seasonal decomposition of order trends. | Time-series models must include monthly/holiday harmonics. |
 | 2026-04-20 | Sentiment Leading Indicator: Rating dropped 12% from peak before 2019 collapse. | `06_avg_rating_trend.png` | Sentiment predictive power is high; precedes volume shifts. |
-| 2026-04-20 | Golden Lags: Traffic Lag-1 (0.28) and Sentiment Rolling-30 are primary modeling signals. | `scripts/find_optimal_lags.py` | Implement Lag-1 traffic and smoothed sentiment as core features. |
-| 2026-04-20 | Objective Pivot: MAE Regression (L1) outperforms MSE and Tweedie for this task. | `scripts/loss_function_battle.py` | Use `objective='regression_l1'` to minimize forecasting error. |
-| 2026-04-20 | **Scale Bias (57%)**: Models trained on pre-2019 data over-predict 2022 revenue by 57% without daily traffic anchors. | `scripts/blind_forecast_eval.py` | Must use Sample Weighting or Regime-Specific modeling to handle 18-month blind forecasts. |
-| 2026-04-20 | **YoY Recovery (12%)**: 2022 revenue grew 12.1% YoY, with Q4 momentum at +7.9%. | `scripts/research_yoy_growth.py` | Business is in a "Recovery Regime"; models must account for non-static growth in 2023. |
-| 2026-04-20 | **Scale Diagnostic**: A +10% bias probe confirmed the 1.06M base model is under-predicting the 2023 market scale. | `submissions/submission_probe_p10.csv` | Establishes a technical requirement for growth-aware FE (Drift/Momentum). |
 
 ## Customer Sentiment & Performance Analysis (2012-2022)
 
@@ -125,7 +120,7 @@ This file preserves all statistically verified findings and business insights di
 - **Result**: The two lines overlap **perfectly** across the 2012-2022 timeline.
 - **Finding**: Our transaction-level data is the exact source of truth for the competition targets. There is NO data leakage, NO missing orders, and NO hidden fees/cancellations that distort the target variable.
 
-## Lag & Signal Analysis (Sprint 4.2)
+## Lag & Signal Analysis (EDA Findings)
 
 ### 1. Traffic Signals
 - **Immediate Impact**: `sessions` and `unique_visitors` have a strong positive correlation (~0.28) at **Lag 1 day**.

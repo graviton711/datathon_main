@@ -28,7 +28,7 @@ To ensure consistency, reproducibility, and smooth transitions between sessions,
 ## 6. Git Version Control & Commit Strategy
 - **Baseline Commit**: Initial project structure and venv setup must be committed immediately.
 - **Score Improvement**: A Git commit MUST be made every time a modeling change or feature addition results in a verified improvement in the leaderboard score or CV metric.
-- **Commit Messages**: Use descriptive messages, including the metric improvement (e.g., `feat: Add lag features, MAE improved from 850k to 820k`).
+- **Commit Messages**: Use descriptive messages, including the metric improvement
 
 ## 7. CV-Leaderboard Alignment
 - **Cross-Validation**: Internal CV performance is the primary metric. Never report a Leaderboard improvement that isn't backed by a statistically significant CV improvement.
@@ -41,3 +41,13 @@ To ensure consistency, reproducibility, and smooth transitions between sessions,
 ## 9. Baseline First
 - **Benchmarking**: Always establish a simple baseline (e.g., Naive mean or Linear Regression) before moving to advanced algorithms (GBDTs).
 - **Goal**: Measure the real value-add of complexity.
+
+## 10. Minimalist Config & Data-Driven Signals
+- **Config Discipline**: `src/config.py` MUST only contain structural configurations (paths, directories) and core model hyperparameters (e.g., LGBM `num_leaves`, `learning_rate`).
+- **Data-Driven Multipliers**: All business-logic multipliers (lifts, boosts, momentum factors, window sizes) MUST be calculated dynamically from the training data within the pipeline (e.g., `calculate_market_signals`).
+- **Goal**: Ensure the pipeline automatically adapts to different data regimes (2022 vs 2023) without manual hardcoding of magic numbers.
+
+## 11. Submission & File Management Discipline
+- **Fixed Output Name**: The production submission file MUST always be named `submission.csv` in the `submissions/` directory. Avoid suffixing filenames with timestamps or versions unless explicitly requested.
+- **Minimalism**: Ruthlessly avoid creating unnecessary files. If a temporary script is needed for testing, use the `scratch/` directory and ensure it is cleaned up or documented.
+- **Single Source of Truth**: Keep logic in the core pipeline scripts (`builder.py`, `pipeline.py`) rather than scattering it across multiple experimental scripts.
