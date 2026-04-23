@@ -127,37 +127,41 @@ class ForecastingPipeline:
             self.q4_momentum_map, self.q4_momentum_default
         )
         
-        # 1. Normalize Targets (Learning on a stationary distribution)
-        # Note: We NO LONGER manually overwrite outliers. Instead, we use Sample Weighting.
+        # 1. Calculate Annual Scales
         self.annual_scales_rev = df.groupby('year')['Revenue'].median().to_dict()
         
-        # We anchor to the most recent year's median as the stable base for 2023-2024 scaling
+        # Stability fix: Ensure no zero scales
+        for yr in self.annual_scales_rev:
+            if self.annual_scales_rev[yr] <= 0:
+                self.annual_scales_rev[yr] = df['Revenue'].median()
+        
         years_sorted = sorted(self.annual_scales_rev.keys())
         last_year = years_sorted[-1]
         self.base_scale_rev = self.annual_scales_rev[last_year]
         
-        df['Revenue_norm'] = df['Revenue'] / df['year'].map(self.annual_scales_rev).replace(0, 1e-6)
-        df['COGS_ratio'] = df['COGS'] / (df['Revenue'] + 1e-6)
+        # 2. Add Lags on ABSOLUTE values first to ensure continuity
+        df_lags = self._add_lags(df[['Date', 'year', 'Revenue', 'COGS']])
         
-        # 2. Prepare History for Lags (Normalized)
-        history_full = df[['Date', 'Revenue_norm', 'COGS_ratio']].rename(
-            columns={'Revenue_norm': 'Revenue', 'COGS_ratio': 'COGS'}
-        )
-        self.history_norm = history_full.tail(Config.REC_HISTORY_WINDOW).copy()
+        # 3. Normalize Targets & Lags by the current year's scale (Stationary Transformation)
+        scales = df_lags['year'].map(self.annual_scales_rev).fillna(self.base_scale_rev).replace(0, 1.0)
         
-        print("Preparing Normalized Lag Features...")
-        df_lags = self._add_lags(history_full)
+        df_lags['Revenue_norm'] = df_lags['Revenue'] / scales
+        df_lags['COGS_ratio'] = df_lags['COGS'] / (df_lags['Revenue'] + 1e-6)
         
-        # 3. Align Sample Weights before dropna()
-        # Combination of Recency Decay and Anomaly Weighting
+        for col in self.lag_features:
+            df_lags[col] = df_lags[col] / scales
+            
+        # 4. Prepare History for Inference (Absolute values)
+        self.history_abs_rev = df_lags[['Revenue']].tail(Config.REC_HISTORY_WINDOW).copy()
+        
+        # 5. Apply Data-driven Weights
         df_lags = self._apply_data_driven_weights(df_lags)
         
-        # Now dropna to clean up rolling/lag gaps
+        # Clean up NaNs from lags/rolling
         df_lags = df_lags.dropna().reset_index(drop=True)
         
-        # Target for training is the normalized value
-        y_rev  = df_lags['Revenue']
-        y_cogs = df_lags['COGS']
+        y_rev  = df_lags['Revenue_norm']
+        y_cogs = df_lags['COGS_ratio']
         sample_weights = df_lags['sample_weight']
 
         ratio_q01 = float(np.quantile(y_cogs, 0.01))
@@ -216,6 +220,10 @@ class ForecastingPipeline:
         
         orders_full = pd.read_parquet(Config.ORDERS_FILE)
         orders_full['order_date'] = pd.to_datetime(orders_full['order_date'])
+        
+        max_date = df['Date'].max()
+        orders_full = orders_full[orders_full['order_date'] <= max_date]
+        
         q4_orders = orders_full[orders_full['order_date'].dt.month >= 10].groupby(orders_full['order_date'].dt.year)['order_id'].count()
         
         avail_years = sorted(list(set(q4_rev.index) & set(q4_orders.index) & set(annual_medians.keys())))
@@ -441,51 +449,46 @@ class ForecastingPipeline:
         # X_horizon will contain all features in the correct order
         X_horizon = self.revenue_pipeline.named_steps['features'].transform(horizon_dummy)
         
-        # Use lists for faster buffer management during recursion
-        history_rev = list(self.history_norm['Revenue'].values)
-        history_ratio = list(self.history_norm['COGS'].values)
+        # Use lists for faster buffer management (Storing ABSOLUTE values)
+        history_rev = list(self.history_abs_rev['Revenue'].values)
         
         preds_rev = []
         preds_cogs = []
         
-        # Cache model references for speed
+        # Cache model references
         rev_model = self.revenue_pipeline.named_steps['model']
         cogs_model = self.cogs_pipeline.named_steps['model']
         
         # Recursive Loop
         for i in range(len(horizon)):
-            # 1. Update lag features in-place (First 3 columns)
-            lag_1 = history_rev[-1]
-            lag_7 = history_rev[-7]
-            roll_7 = sum(history_rev[-7:]) / 7.0
+            curr_year = horizon.iloc[i]['year']
+            is_event = is_event_horizon[i]
+            effective_m = year_multipliers[curr_year]['event' if is_event else 'base']
+            projected_median = self.base_scale_rev * effective_m
             
-            # Using .iloc[i, col_idx] is faster than updating the whole row
+            # 1. Update lag features (Normalized on-the-fly to the current projected scale)
+            lag_1 = history_rev[-1] / projected_median
+            lag_7 = history_rev[-7] / projected_median
+            roll_7 = (sum(history_rev[-7:]) / 7.0) / projected_median
+            
             X_horizon.iloc[i, 0] = lag_1
             X_horizon.iloc[i, 1] = lag_7
             X_horizon.iloc[i, 2] = roll_7
             
-            # 2. Model Prediction
+            # 2. Model Prediction (Outputs Normalized Shape)
             current_X = X_horizon.iloc[[i]]
-            raw_norm_rev = rev_model.predict(current_X)[0]
-            raw_ratio = cogs_model.predict(current_X)[0]
-            raw_ratio = float(np.clip(raw_ratio, self.cogs_ratio_clip[0], self.cogs_ratio_clip[1]))
+            raw_norm_rev = float(np.clip(rev_model.predict(current_X)[0], 0.0, 5.0))
+            raw_ratio = float(np.clip(cogs_model.predict(current_X)[0], self.cogs_ratio_clip[0], self.cogs_ratio_clip[1]))
             
-            # 3. Scaling
-            curr_date = horizon.iloc[i]['Date']
-            curr_year = horizon.iloc[i]['year']
-            is_event = is_event_horizon[i]
-            
-            effective_m = year_multipliers[curr_year]['event' if is_event else 'base']
-            
-            final_rev = max(0, raw_norm_rev * self.base_scale_rev * effective_m)
+            # 3. Scaling back to Absolute
+            final_rev = max(0, raw_norm_rev * projected_median)
             final_cogs = max(0, final_rev * raw_ratio)
             
             preds_rev.append(final_rev)
             preds_cogs.append(final_cogs)
             
-            # 4. Update Buffer (normalized values)
-            history_rev.append(raw_norm_rev)
-            history_ratio.append(raw_ratio)
+            # 4. Update Buffer with ABSOLUTE Revenue
+            history_rev.append(final_rev)
             
         return pd.DataFrame({
             'Date': horizon['Date'],

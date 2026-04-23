@@ -148,4 +148,36 @@ This file tracks the evolution of the project and serves as context for future s
     - Result: Successfully fulfilled Rule 10 by removing hardcoded 0.8 and 0.9 multipliers from `Config`.
 - Refine outlier smoothing to be trend-aware.
 
-- Refine outlier smoothing to be trend-aware.
+## [2026-04-23] Session 8: Stationary Lag Normalization & Recursive Stabilization
+
+### Tasks Accomplished:
+- **Year-Boundary Bias Fix**: Identified and resolved a critical scale-mismatch in lag features. Lags are now calculated on absolute values and normalized dynamically by the target year's scale during both training and inference.
+- **Pipeline Refactor**: Switched `ForecastingPipeline` buffer to store absolute revenue, ensuring recursive predictions use consistent stationary lags.
+- **Data-Driven Weights**: Verified the impact of anomaly weighting based on the Revenue/Sessions efficiency ratio.
+
+### Key Decisions:
+- Mantained the **Recursive Pipeline** but hardened it against "Snowball effect" by ensuring lag features are always stationary relative to the current year's projected median.
+- Chose **Dynamic Normalization** over static per-year normalization to remove the "cliff" artifact at Jan 1st.
+
+### Current State:
+- Pipeline is structurally sound and mathematically consistent across year boundaries.
+- Ready for full 3-Fold Walk-Forward validation to verify score improvement toward the 610k target.
+
+## [2026-04-23] Session 9: Context Synchronization & Baseline Verification
+
+### Tasks Accomplished:
+- **Full Project Audit**: Thoroughly reviewed all `src/`, `docs/`, and `tasks/` files to synchronize with the current project state.
+- **Baseline Verification**: Executed `evaluate.py` to establish a clean starting point for the new session.
+- **Roadmap Creation**: Created `tasks/todo.md` to track progress toward the 610k MAE target.
+
+### Key Decisions:
+- Verified that the current **Weighted Total MAE is 1,190,251** (Revenue 631k, COGS 560k). This is significantly better than the previous 1.32M record, confirming the efficacy of the Session 8 refactors.
+- Confirmed "Catalog Momentum" as the next high-priority optimization.
+
+### Current State:
+- Pipeline is verified and performing at 1.19M Total MAE.
+- All documentation is up-to-date and reflects the current verified score.
+- Ready to implement Catalog Momentum.
+
+### Next Steps:
+- Implement Catalog Momentum by extracting SKU counts and integrating them into the inertia calibration logic.

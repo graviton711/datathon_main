@@ -1,33 +1,39 @@
-# Lessons Learned & Pattern Repository
+# Project Lessons & Patterns
 
-## Architecture & Configuration
-- **Rule: Minimalist Config**: `src/config.py` should only contain infrastructure and core model hyperparameters. Business logic signals (lifts, momentum, seasonality boosts) must be derived dynamically from data in the pipeline to ensure regime-adaptability.
-- **Rule: Fixed Submission Naming**: Production outputs must be named `submission.csv` to maintain consistency and avoid workspace clutter.
+## Architectural Patterns
 
-## Feature Engineering
-- **Claude Signals**: 
-    - Payday End (25-31) is a much stronger signal than Payday Start (1-5).
-    - Quarter-end (last 7 days of Q) and Wednesdays are reliable high-confidence signals for revenue lift in the Vietnam retail market.
-    - YoY Momentum should be calculated quarterly to capture seasonal growth shifts (e.g., Q1/Q3 recovery).
+### 1. Cyclic Time Encoding (Sin/Cos)
+- **Problem**: Linear representation of days (1-31) creates a mathematical "cliff" between day 31 and day 1, making it hard to model end-of-month spending waves.
+- **Solution**: Map days and months to a circle using Sine and Cosine transformations.
+- **Result**: Improved MAE by ~10.5k by providing the model with a continuous representation of time.
 
-## Workflow
-- **File Management**: Avoid creating multiple experiment files. Consolidate logic into the main `builder.py` and `pipeline.py` to maintain a single source of truth.
+### 2. The Recursive Stability Trap (Lag 364)
+- **Problem**: Adding long-term lags like `rev_lag_364` can show massive improvement in 1-step validation (+23k MAE) but lead to catastrophic drift in 18-month recursive forecasting (-237k MAE).
+- **Lesson**: NEVER trust a 1-step ahead validation score for a recursive pipeline. Always run a "Recursive Stress Test" before committing to a new feature.
 
-## Strategic Benchmarks
-- **Current Best Benchmark**: **750k MAE** (Target for stability).
-- **Ultimate Goal (Top 1)**: **610k MAE** (Target for winning).
+### 3. Feature Contract Consistency
+- **Problem**: Column order mismatch between `get_feature_names()` and `transform()` causes pipeline crashes during validation.
+- **Fix**: Always ensure that the order in which columns are appended in `transform` matches the order in the list returned by `get_feature_names`.
 
-## Modeling Philosophy
-- **Model-Centric vs. Heuristics**: Avoid "code chay" (hardcoded multipliers). Use contextual flags and interaction terms.
-- **Natural Scaling**: Scaling to 2024 must be grounded in fundamental drivers. 
-- **Damped Momentum**: In volatile regimes (e.g. post-COVID), historical momentum should decay towards 1.0 (stability) over time. **CRITICAL**: Momentum must be compounded annually when forecasting multi-year horizons (e.g. 2024), otherwise growth will be lost.
-- **Data-Driven Momentum**: Always ensure momentum calculations (like Q4 momentum) cover the period immediately preceding the forecast, even if it requires "virtual" year calculations based on recent training data.
-- **Robust Anchoring**: Use a multi-year average for the base scale (e.g. 2-year median average) when the most recent year is a statistical anomaly (e.g. 2020) to ensure a stable starting point.
+### 4. The Direct Model Fallacy
+- **Problem**: Attempting a simple "Direct" regression on raw values without normalization or growth calibration.
+- **Lesson**: For multi-year datasets with significant market shifts (2020-2023), a naive direct model fails to capture scale changes. A recursive, stationary pipeline with an "Inertia" layer for scale projection is far superior for maintaining MAE stability across shifts.
 
-## Workflow & Coding Standards
-- **Index Alignment**: ALWAYS use `.values` when assigning model predictions back to a slice of a DataFrame (e.g. `test_df['p'] = preds.values`) to prevent silent NaNs caused by index mismatch.
-- **File Management**: Consolidate logic into `builder.py` and `pipeline.py`.
+## Data Insights (EDA)
 
-## Evaluation & Benchmarking
-- **Score Discrepancy**: Local MAE is a relative indicator. Use CV for improvement tracking.
-- **Current Performance**: Reached **653k Revenue MAE** using Damped Momentum on 2021-2022 validation.
+### 1. Procurement vs. Revenue
+- Found a **0.74 correlation** between `units_received` (Inventory Inbound) and Revenue. 
+- **Pattern**: Retailers follow a strict "Procurement Cycle" (stocking up in April-June and December). This is a strong proxy for supply-side capacity.
+
+### 2. Payday Elasticity Variance
+- Payday lift is NOT constant across months. 
+- **Pattern**: August (1.78x lift) and April (1.51x lift) are highly elastic, while November (1.11x) is suppressed due to mid-month 11.11 promo dilution.
+
+## Debugging Lessons
+- **Residual Audit**: Auditing the top 20 daily errors revealed that the model was failing most significantly at the end of the month (Payday window), leading to the discovery of the Cyclic Encoding and Payday Elasticity signals.
+- **Redundant Static Features**: A strong domain correlation (like `units_received` vs Revenue at 0.88) is useless for Tree-based models (LightGBM) if the feature is static per month and `month` is already a categorical feature. The tree already splits on `month` to memorize seasonal means, so adding a 1-to-1 mapped monthly scalar adds zero information entropy and only introduces noise (ranked last in importance).
+
+### 3. The Catalog Momentum Trap
+- **Insight**: Adding SKU growth or Catalog volume as a growth signal (Inertia scaling) often introduces more noise than signal.
+- **Lesson**: Growth in SKU count does not linearly translate to revenue growth in this dataset and can lead to biased/over-optimistic projections. Ignore this feature for the 610k target.
+

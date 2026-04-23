@@ -52,6 +52,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
             df[self.date_col] = pd.to_datetime(df[self.date_col])
             
             self.start_date_ref = df[self.date_col].min()
+            self.max_date_ref = df[self.date_col].max()
             
             df['year'] = df[self.date_col].dt.year
             df['month'] = df[self.date_col].dt.month
@@ -62,7 +63,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
                 self._discover_event_scores(df)
             # 5. Category Profile Discovery
             if not self.category_profile_map:
-                self._discover_category_profiles()
+                self._discover_category_profiles(self.max_date_ref)
         
         return self
 
@@ -120,7 +121,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         if self.event_score_map:
             print(f"Discovery complete: Found {len(self.event_score_map)} pure event signals.")
 
-    def _discover_category_profiles(self):
+    def _discover_category_profiles(self, max_date=None):
         """
         Calculates historical monthly revenue shares for each category.
         This captures the 'Category Mix' signal which is highly correlated with total revenue.
@@ -129,11 +130,15 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         try:
             # 1. Load raw data for mix calculation
             orders = pd.read_parquet(Config.DATA_DIR / "processed" / "orders.parquet")[['order_id', 'order_date']]
+            
+            orders['order_date'] = pd.to_datetime(orders['order_date'])
+            if max_date is not None:
+                orders = orders[orders['order_date'] <= max_date]
+                
             items = pd.read_parquet(Config.DATA_DIR / "processed" / "order_items.parquet")[['order_id', 'product_id', 'quantity', 'unit_price', 'discount_amount']]
             products = pd.read_parquet(Config.DATA_DIR / "processed" / "products.parquet")[['product_id', 'category']]
             
             # 2. Merge and calculate revenue
-            orders['order_date'] = pd.to_datetime(orders['order_date'])
             items = pd.merge(items, orders, on='order_id')
             items = pd.merge(items, products, on='product_id')
             items['item_rev'] = items['quantity'] * items['unit_price'] - items['discount_amount']
@@ -194,6 +199,13 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         unique_years = X['year'].unique()
         year_momentum_map = {y: self._resolve_prev_q4_momentum(y) for y in unique_years}
         X['prev_q4_momentum'] = X['year'].map(year_momentum_map)
+
+        # Add Cyclic Encoding for Day and Month
+        days_in_month = X[self.date_col].dt.days_in_month
+        X['day_sin'] = np.sin(2 * np.pi * X['day'] / days_in_month)
+        X['day_cos'] = np.cos(2 * np.pi * X['day'] / days_in_month)
+        X['month_sin'] = np.sin(2 * np.pi * X['month'] / 12)
+        X['month_cos'] = np.cos(2 * np.pi * X['month'] / 12)
             
         # Drop non-feature columns
         cols_to_drop = [self.date_col, 'mmdd']
@@ -212,7 +224,11 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
     def get_feature_names(self):
         base_features = ['month', 'day', 'day_of_week', 'is_wednesday', 'is_weekend', 
                          'is_payday_start', 'is_payday_end', 'is_quarter_end',
-                         'days_to_tet', 'event_score', 'prev_q4_momentum']
-        
+                         'days_to_tet', 'event_score']
         cat_features = [f'share_{cat.lower()}' for cat in self.categories_]
-        return base_features + cat_features
+        
+        # Cyclic features are added after category shares
+        cyclic_features = ['day_sin', 'day_cos', 'month_sin', 'month_cos']
+        
+        # prev_q4_momentum is added last in transform()
+        return base_features + cat_features + cyclic_features + ['prev_q4_momentum']

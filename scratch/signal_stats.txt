@@ -1,0 +1,13 @@
+--- Lag Correlation Matrix (Target: YoY Revenue Growth) ---
+lag                0         7         14        30
+signal                                             
+avg_price    0.094950  0.137724  0.160705  0.124135
+bounce_rate -0.012131 -0.009301 -0.010590 -0.022387
+rating_30d   0.060196  0.051294  0.049571  0.067519
+sessions    -0.010274 -0.000418  0.003140 -0.007277
+
+--- Key Observations ---
+- sessions: Best correlation -0.010 at lag 0 days
+- bounce_rate: Best correlation -0.022 at lag 30 days
+- rating_30d: Best correlation 0.068 at lag 30 days
+- avg_price: Best correlation 0.161 at lag 14 days

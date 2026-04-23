@@ -13,14 +13,14 @@ from src.training.pipeline import ForecastingPipeline
 from src.config import Config
 
 def objective(trial):
-    # 1. Suggest Hyperparameters
+    # 1. Suggest Hyperparameters (More conservative for recursive stability)
     params = {
-        'num_leaves': trial.suggest_int('num_leaves', 16, 128),
-        'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.1, log=True),
-        'feature_fraction': trial.suggest_float('feature_fraction', 0.5, 1.0),
-        'bagging_fraction': trial.suggest_float('bagging_fraction', 0.5, 1.0),
-        'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
-        'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+        'num_leaves': trial.suggest_int('num_leaves', 20, 48),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.04),
+        'feature_fraction': trial.suggest_float('feature_fraction', 0.7, 0.9),
+        'bagging_fraction': trial.suggest_float('bagging_fraction', 0.7, 0.9),
+        'bagging_freq': trial.suggest_int('bagging_freq', 1, 5),
+        'min_child_samples': trial.suggest_int('min_child_samples', 20, 60),
         'objective': 'regression',
         'random_state': 42,
         'verbose': -1
@@ -41,26 +41,30 @@ def objective(trial):
     fold_maes = []
     
     for (start_year, train_end, test_year), weight in zip(folds, weights):
-        train_df = sales[(sales['Date'].dt.year >= start_year) & (sales['Date'].dt.year <= train_end)].copy()
-        test_df = sales[sales['Date'].dt.year == test_year].copy()
+        try:
+            train_df = sales[(sales['Date'].dt.year >= start_year) & (sales['Date'].dt.year <= train_end)].copy()
+            test_df = sales[sales['Date'].dt.year == test_year].copy().dropna(subset=['Revenue'])
+            
+            # Initialize Pipeline with trial params
+            pipeline = ForecastingPipeline()
+            pipeline.revenue_pipeline.named_steps['model'].set_params(**params)
+            pipeline.cogs_pipeline.named_steps['model'].set_params(**params)
+            
+            pipeline.fit(train_df)
+            forecast = pipeline.predict(test_df[['Date']])
+            
+            if forecast['Revenue'].isnull().any():
+                print(f"  [Fold {test_year}] Found NaNs in forecast. Trial failed.")
+                return 1e9
+                
+            mae = np.abs(forecast['Revenue'].values - test_df['Revenue'].values).mean()
+            fold_maes.append(mae * weight)
+        except Exception as e:
+            print(f"  [Fold {test_year}] Crash: {e}")
+            return 1e9
         
-        # Initialize Pipeline with trial params
-        pipeline = ForecastingPipeline()
-        # Manually override the model in the pipeline
-        pipeline.revenue_pipeline.named_steps['model'].set_params(**params)
-        pipeline.cogs_pipeline.named_steps['model'].set_params(**params)
-        
-        # Fit and Evaluate
-        pipeline.fit(train_df)
-        
-        # Predict 
-        forecast = pipeline.predict(test_df[['Date']])
-        
-        # Calculate Revenue MAE
-        mae = np.abs(forecast['Revenue'] - test_df['Revenue']).mean()
-        fold_maes.append(mae * weight)
-        
-    return sum(fold_maes)
+    final_score = sum(fold_maes)
+    return final_score if not np.isnan(final_score) else 1e9
 
 def run_optimization():
     print("Starting Bayesian Optimization with Optuna...")
