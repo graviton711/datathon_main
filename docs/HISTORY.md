@@ -78,3 +78,74 @@ This file tracks the evolution of the project and serves as context for future s
 - EDA phase is **100% Complete**.
 - Root Cause is fully documented and statistically verified.
 - Data integrity is confirmed for modeling.
+
+## [2026-04-23] Session 5: Model Refinement & Stabilization
+
+### Tasks Accomplished:
+- **Comprehensive Audit**: Reviewed all `docs/`, `src/`, and `data/` directories.
+- **Bug Fix**: Resolved a critical index alignment bug in `evaluate.py` that caused NaNs in metrics.
+- **Feature Enrichment**: Integrated high-confidence signals (Wednesdays, Payday End, Quarter End) into the pipeline.
+- **Momentum Stabilization**: Implemented **Damped Dual-Momentum** and **Robust Base Scale** (2-year average) to handle regime shifts.
+- **Performance Leap**: Reduced Revenue MAE from **891k** to **653k** (Total MAE 1.37M) in Walk-Forward validation.
+
+### Key Decisions:
+- Adopted **Micro-average ratios** (weighted sums) for momentum calculation to ensure statistical stability.
+- Shifted from "Exponential Momentum" to "Damped Momentum" to prevent unrealistic long-term projections.
+
+### Current State:
+- Project structure and logic are well-understood.
+- Modeling pipeline is stable and ready for further optimization.
+
+### Next Steps:
+- Proceed with instructions from the user for further model refinement or reporting.
+
+## [2026-04-23] Session 6: Silent-Bug Fixes & COGS Ratio Refactor
+
+### Tasks Accomplished:
+- **Bug A Fixed (Q4 Momentum Source)**: Moved `prev_q4_momentum` source from normalized training target to a raw-revenue Q4 momentum map computed before normalization.
+- **Bug B Fixed (2024 Zero Artifact)**: Added robust fallback logic for unseen years (carry-forward latest known momentum), eliminating missing-key `0.0` leakage in 2024.
+- **Bug C Fixed (Ghost Feature)**: Removed `year` from transformer output to prevent unintended model leakage and train/inference feature drift.
+- **COGS Refactor**: Replaced absolute COGS forecasting branch with `COGS/Revenue` ratio modeling, then reconstructed final COGS as `final_revenue * predicted_ratio`.
+- **Schema Guardrails**: Added strict feature-contract validation to enforce identical transformed columns between training and inference.
+- **Validation Run**: Executed walk-forward evaluation (`Train<=2020`, `Test=2021-2022`) successfully after refactor.
+
+### Key Decisions:
+- Keep Revenue as the primary absolute forecast target, and model COGS as a dependent ratio to improve stability under regime shifts.
+- Use quantile clipping on predicted ratio (derived from training target distribution) to reduce extreme COGS forecasts.
+- Enforce deterministic transformer output ordering (`lag features + declared engineered features`) to avoid silent feature drift.
+
+### Current State:
+- Silent bugs identified by feature audit are patched in the production pipeline.
+- Feature schema is now explicit and validated.
+- Walk-forward score improved to **Total MAE: 1,327,352** with Revenue MAE **691,451** and COGS MAE **635,901**.
+
+### Next Steps:
+- Run ablation to isolate gain contribution from each fix (A/B/C vs ratio refactor).
+- Tune COGS ratio clipping bounds and momentum decay jointly for further MAE reduction.
+
+## [2026-04-23] Session 7: Comprehensive Code Review & Roadmap Update
+
+### Tasks Accomplished:
+- **Full Code Audit**: Reviewed `config.py`, `builder.py`, `pipeline.py`, and `evaluate.py` against Project Rules.
+- **Gap Identification**: Identified missing 3-Fold CV, hardcoded "magic numbers" (`INERTIA_WEIGHT`, `DAMPING`), and performance bottlenecks (`.apply()`).
+- **Roadmap Refactoring**: Updated `tasks/todo.md` with a prioritized list focusing on validation integrity and data-driven parameters.
+
+### Key Decisions:
+- Prioritize **Validation Integrity** (3-Fold CV) as the next critical step to avoid overfitting and ensure path to 610k.
+- Aggressively remove remaining magic numbers in `Config` by making them derived from training data statistics.
+
+### Current State:
+- Project roadmap is now strictly aligned with 610k target.
+- Technical debt (vectorization, magic numbers) is mapped and ready for resolution.
+
+### Tasks Accomplished (Update):
+- **Implemented 3-Fold Walk-Forward CV**: Upgraded `evaluate.py` to support weighted 3-fold validation (20/30/50 split). 
+    - Results: Mean Total MAE = 1.48M, Weighted Total MAE = 1.41M. 
+    - Insight: Revenue MAE remains stable at ~700k for 2021-2022, but 2020 (1.3M) remains a significant outlier.
+
+### Next Steps:
+- **Eliminated Magic Numbers**: Refactored `pipeline.py` to derive `INERTIA_WEIGHT` and `MOMENTUM_DAMPING` from historical data statistics and R-squared confidence. 
+    - Result: Successfully fulfilled Rule 10 by removing hardcoded 0.8 and 0.9 multipliers from `Config`.
+- Refine outlier smoothing to be trend-aware.
+
+- Refine outlier smoothing to be trend-aware.

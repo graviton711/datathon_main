@@ -18,5 +18,16 @@
 - **Ultimate Goal (Top 1)**: **610k MAE** (Target for winning).
 
 ## Modeling Philosophy
-- **Model-Centric vs. Heuristics**: Avoid "code chay" (hardcoded multipliers like `expected_market_lift *= 1.50`). Instead, provide the model with explicit contextual flags (`is_pre_tet`) and interaction terms (`tet_x_payday`). This allows the model to learn the true weights from the data distribution rather than relying on human-enforced overrides, ensuring better generalization to future data.
-- **Natural Scaling**: Scaling to 2024 must be grounded in fundamental drivers (Traffic * CR * AOV). If a higher growth is needed to match the benchmark, it should be explained by the compounding of these drivers (e.g. CR improving over time) rather than arbitrary constants.
+- **Model-Centric vs. Heuristics**: Avoid "code chay" (hardcoded multipliers). Use contextual flags and interaction terms.
+- **Natural Scaling**: Scaling to 2024 must be grounded in fundamental drivers. 
+- **Damped Momentum**: In volatile regimes (e.g. post-COVID), historical momentum should decay towards 1.0 (stability) over time. **CRITICAL**: Momentum must be compounded annually when forecasting multi-year horizons (e.g. 2024), otherwise growth will be lost.
+- **Data-Driven Momentum**: Always ensure momentum calculations (like Q4 momentum) cover the period immediately preceding the forecast, even if it requires "virtual" year calculations based on recent training data.
+- **Robust Anchoring**: Use a multi-year average for the base scale (e.g. 2-year median average) when the most recent year is a statistical anomaly (e.g. 2020) to ensure a stable starting point.
+
+## Workflow & Coding Standards
+- **Index Alignment**: ALWAYS use `.values` when assigning model predictions back to a slice of a DataFrame (e.g. `test_df['p'] = preds.values`) to prevent silent NaNs caused by index mismatch.
+- **File Management**: Consolidate logic into `builder.py` and `pipeline.py`.
+
+## Evaluation & Benchmarking
+- **Score Discrepancy**: Local MAE is a relative indicator. Use CV for improvement tracking.
+- **Current Performance**: Reached **653k Revenue MAE** using Damped Momentum on 2021-2022 validation.

@@ -3,6 +3,13 @@ import numpy as np
 import lightgbm as lgb
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
+import sys
+import os
+from pathlib import Path
+
+# Add project root to sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.append(str(PROJECT_ROOT))
 
 from src.config import Config
 from src.features.builder import BaselineFeatureExtractor
@@ -12,9 +19,17 @@ class ForecastingPipeline:
     Standard OOP Pipeline orchestrator for training and inference.
     """
     def __init__(self):
-        self.features = ['month', 'day', 'day_of_week', 'is_weekend', 'days_to_tet', 'event_score', 'prev_q4_momentum']
-        self.categorical_features = ['month', 'day_of_week', 'is_weekend']
+        self.lag_features = ['rev_lag_1', 'rev_lag_7', 'rev_roll_7']
+        self.features = [] # Will be populated dynamically by the extractor
+        self.feature_cols = ['Date'] + self.lag_features
+        self.model_feature_order = self.lag_features + self.features
+        self.categorical_features = ['month', 'day_of_week', 'is_wednesday', 'is_weekend', 
+                                      'is_payday_start', 'is_payday_end', 'is_quarter_end']
         self.growth_map = None # Monthly YoY growth ratios
+        self.inertia_params = {'intercept': 0.0, 'w_rev': 0.0, 'w_order': 1.0, 'w_aov': 0.0}
+        self.q4_momentum_map = {}
+        self.q4_momentum_default = 0.0
+        self.cogs_ratio_clip = (0.0, 2.0)
         
         # Scikit-Learn Pipeline for Revenue
         self.revenue_pipeline = Pipeline([
@@ -42,39 +57,232 @@ class ForecastingPipeline:
             ))
         ])
 
+    def _is_signaled(self, dates: pd.Series) -> pd.Series:
+        """Centralized logic for event signaling (Vectorized)."""
+        event_map = self.revenue_pipeline.named_steps['features'].event_score_map
+        # Convert (month, day) map to (month*100 + day) for vectorized map
+        event_map_vec = {m * 100 + d: True for (m, d) in event_map.keys()}
+        mmdd = dates.dt.month * 100 + dates.dt.day
+        is_event_discovered = mmdd.map(event_map_vec).fillna(False)
+        
+        return (dates.dt.day >= 25) | (dates.dt.dayofweek == 2) | is_event_discovered
+
+    def _add_lags(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Adds short-term memory features using only Revenue to avoid feedback loops."""
+        df = df.copy()
+        # Revenue Lags are used for both models (Option A)
+        df['rev_lag_1'] = df['Revenue'].shift(1)
+        df['rev_lag_7'] = df['Revenue'].shift(7)
+        df['rev_roll_7'] = df['Revenue'].shift(1).rolling(7, min_periods=7).mean()
+        # No COGS lags to prevent noise amplification
+        return df # No bfill here, handled in fit/predict
+
+    def _calculate_q4_momentum_from_raw(self, df: pd.DataFrame):
+        """Compute year-level Q4 momentum from raw revenue (before normalization)."""
+        tmp = df[['Date', 'Revenue']].copy()
+        tmp['Date'] = pd.to_datetime(tmp['Date'])
+        tmp['year'] = tmp['Date'].dt.year
+        tmp['month'] = tmp['Date'].dt.month
+
+        q4_totals = tmp[tmp['month'] >= 10].groupby('year')['Revenue'].sum().to_dict()
+        years = sorted(tmp['year'].unique())
+        
+        # Extend to include the momentum for the next year (e.g. 2023) if training has Q4 data
+        target_years = years + [max(years) + 1]
+
+        valid = {}
+        for yr in target_years:
+            prev_q4 = q4_totals.get(yr - 1)
+            prev2_q4 = q4_totals.get(yr - 2)
+            if prev_q4 is not None and prev2_q4 is not None and prev2_q4 > 0:
+                valid[yr] = (prev_q4 / (prev2_q4 + 1e-6)) - 1.0
+
+        default_val = float(np.median(list(valid.values()))) if valid else 0.0
+        momentum_map = {yr: valid.get(yr, default_val) for yr in target_years}
+        return momentum_map, default_val
+
+    def _validate_feature_contract(self, X_sample: pd.DataFrame):
+        """Ensure train/inference both see the exact same feature schema."""
+        transformed_rev = self.revenue_pipeline.named_steps['features'].transform(X_sample.copy())
+        transformed_cogs = self.cogs_pipeline.named_steps['features'].transform(X_sample.copy())
+
+        for model_name, transformed in [('revenue', transformed_rev), ('cogs_ratio', transformed_cogs)]:
+            cols = list(transformed.columns)
+            if cols != self.model_feature_order:
+                raise ValueError(
+                    f"Feature contract mismatch for {model_name}. "
+                    f"Expected {self.model_feature_order}, got {cols}"
+                )
+
     def fit(self, df: pd.DataFrame):
-        print("Pre-processing outliers in training data...")
-        df = self._smooth_training_outliers(df)
+        df = df.copy().sort_values('Date').reset_index(drop=True)
+        df['year'] = df['Date'].dt.year
+
+        # 0. Pre-compute Q4 momentum from raw revenue (before any normalization)
+        self.q4_momentum_map, self.q4_momentum_default = self._calculate_q4_momentum_from_raw(df)
+        self.revenue_pipeline.named_steps['features'].set_q4_momentum_map(
+            self.q4_momentum_map, self.q4_momentum_default
+        )
+        self.cogs_pipeline.named_steps['features'].set_q4_momentum_map(
+            self.q4_momentum_map, self.q4_momentum_default
+        )
         
-        print("Training Baseline Revenue Model...")
-        # X chỉ chứa Date, y chứa Revenue/Target
-        X = df[['Date']].copy()
-        y_rev = df['Revenue']
-        y_cogs_ratio = df['COGS'] / (df['Revenue'] + 1e-6)
+        # 1. Normalize Targets (Learning on a stationary distribution)
+        # Note: We NO LONGER manually overwrite outliers. Instead, we use Sample Weighting.
+        self.annual_scales_rev = df.groupby('year')['Revenue'].median().to_dict()
         
-        # Calculate time-decay weights inside fit
-        start_date_ref = df['Date'].min()
-        days_from_start = (df['Date'] - start_date_ref).dt.days
-        max_days = days_from_start.max()
-        # Memory Tuning: Relax decay to preserve 10yr historical signals (Rule 10)
-        sample_weights = np.exp((days_from_start - max_days) / (365.0 * 2.5))
+        # We anchor to the most recent year's median as the stable base for 2023-2024 scaling
+        years_sorted = sorted(self.annual_scales_rev.keys())
+        last_year = years_sorted[-1]
+        self.base_scale_rev = self.annual_scales_rev[last_year]
         
-        # Train pipelines
-        # LightGBM categorical features must be passed in fit_params
+        df['Revenue_norm'] = df['Revenue'] / df['year'].map(self.annual_scales_rev).replace(0, 1e-6)
+        df['COGS_ratio'] = df['COGS'] / (df['Revenue'] + 1e-6)
+        
+        # 2. Prepare History for Lags (Normalized)
+        history_full = df[['Date', 'Revenue_norm', 'COGS_ratio']].rename(
+            columns={'Revenue_norm': 'Revenue', 'COGS_ratio': 'COGS'}
+        )
+        self.history_norm = history_full.tail(Config.REC_HISTORY_WINDOW).copy()
+        
+        print("Preparing Normalized Lag Features...")
+        df_lags = self._add_lags(history_full)
+        
+        # 3. Align Sample Weights before dropna()
+        # Combination of Recency Decay and Anomaly Weighting
+        df_lags = self._apply_data_driven_weights(df_lags)
+        
+        # Now dropna to clean up rolling/lag gaps
+        df_lags = df_lags.dropna().reset_index(drop=True)
+        
+        # Target for training is the normalized value
+        y_rev  = df_lags['Revenue']
+        y_cogs = df_lags['COGS']
+        sample_weights = df_lags['sample_weight']
+
+        ratio_q01 = float(np.quantile(y_cogs, 0.01))
+        ratio_q99 = float(np.quantile(y_cogs, 0.99))
+        self.cogs_ratio_clip = (ratio_q01, ratio_q99)
+        
+        # Feature columns
+        X = df_lags[self.feature_cols].copy()
+        
         fit_params = {
             'model__categorical_feature': self.categorical_features,
             'model__sample_weight': sample_weights
         }
         
+        print("Training Normalized Revenue Model...")
         self.revenue_pipeline.fit(X, y_rev, **fit_params)
         
-        print("Training Baseline COGS Ratio Model...")
-        self.cogs_pipeline.fit(X, y_cogs_ratio, **fit_params)
+        # Update feature contract based on dynamic discovery from the fitted extractor
+        extractor = self.revenue_pipeline.named_steps['features']
+        self.features = extractor.get_feature_names()
+        self.model_feature_order = self.lag_features + self.features
+        
+        # Share discovered signals with COGS model to avoid redundant computation
+        self.cogs_pipeline.named_steps['features'].event_score_map = extractor.event_score_map
+        self.cogs_pipeline.named_steps['features'].category_profile_map = extractor.category_profile_map
+        self.cogs_pipeline.named_steps['features'].categories_ = extractor.categories_
+        
+        print("Training COGS Ratio Model...")
+        self.cogs_pipeline.fit(X, y_cogs, **fit_params)
 
-        # Calculate Data-Driven Growth Calibration Map (Rule 10 compliant)
+        self._validate_feature_contract(X.head(32).copy())
+
+        # 3. Growth Calibration & Weight Discovery
+        self._discover_inertia_params(df)
         self._calculate_growth_calibration(df)
         
         return self
+
+    def _discover_inertia_params(self, df: pd.DataFrame):
+        """
+        Learns the relationship between Q4 signals and next-year growth using historical data.
+        Rule: No magic numbers. Weights are derived via Log-Linear Regression.
+        """
+        print("Starting Dynamic Inertia Weight Discovery...")
+        
+        # 1. Prepare historical yearly stats
+        tmp = df.copy()
+        tmp['year'] = tmp['Date'].dt.year
+        tmp['month'] = tmp['Date'].dt.month
+        
+        annual_medians = tmp.groupby('year')['Revenue'].median().to_dict()
+        
+        # Aggregate Q4 signals
+        q4_data = tmp[tmp['month'] >= 10].copy()
+        q4_rev = q4_data.groupby('year')['Revenue'].sum()
+        
+        orders_full = pd.read_parquet(Config.ORDERS_FILE)
+        orders_full['order_date'] = pd.to_datetime(orders_full['order_date'])
+        q4_orders = orders_full[orders_full['order_date'].dt.month >= 10].groupby(orders_full['order_date'].dt.year)['order_id'].count()
+        
+        avail_years = sorted(list(set(q4_rev.index) & set(q4_orders.index) & set(annual_medians.keys())))
+        
+        if len(avail_years) < 3:
+            print("Warning: Insufficient historical years for regression. Using default Order-priority weights.")
+            return
+
+        # 2. Build training set for Inertia Model
+        rows = []
+        for i in range(2, len(avail_years)):
+            yr_target = avail_years[i]
+            yr_prev = avail_years[i-1]
+            yr_prev2 = avail_years[i-2]
+            
+            # Target: Log of realized annual growth
+            log_g = np.log(annual_medians[yr_target] / (annual_medians[yr_prev] + 1e-6) + 1e-6)
+            
+            # Signals: Log of Q4 YoY Momentum
+            log_m_rev = np.log(q4_rev[yr_prev] / (q4_rev[yr_prev2] + 1e-6) + 1e-6)
+            log_m_order = np.log(q4_orders[yr_prev] / (q4_orders[yr_prev2] + 1e-6) + 1e-6)
+            log_m_aov = log_m_rev - log_m_order # log(A/B) = log(A) - log(B)
+            
+            rows.append({'y': log_g, 'x_rev': log_m_rev, 'x_order': log_m_order, 'x_aov': log_m_aov})
+            
+        train_df = pd.DataFrame(rows)
+        
+        # 3. Simple Linear Regression to find Beta weights
+        # We use a basic OLS approach via numpy for minimal overhead
+        X = train_df[['x_rev', 'x_order', 'x_aov']].values
+        X = np.hstack([np.ones((X.shape[0], 1)), X]) # Add intercept
+        y = train_df['y'].values
+        
+        try:
+            # Solve (X^T X)^-1 X^T y
+            coeffs, residuals, rank, s = np.linalg.lstsq(X, y, rcond=None)
+            
+            # Calculate R-squared for trust weighting
+            # SST = sum((y - y_mean)^2), SSR = sum(residuals)
+            y_mean = np.mean(y)
+            sst = np.sum((y - y_mean)**2)
+            ssr = residuals[0] if len(residuals) > 0 else 0.0
+            r_squared = 1 - (ssr / (sst + 1e-6))
+            
+            self.inertia_params = {
+                'intercept': float(coeffs[0]),
+                'w_rev':     float(coeffs[1]),
+                'w_order':   float(coeffs[2]),
+                'w_aov':     float(coeffs[3])
+            }
+            
+            # Trust inertia more if R-squared is high, but floor it at 0.5 to avoid neglecting structural signals
+            self.inertia_trust_weight = np.clip(r_squared, 0.5, 0.95)
+            
+            # Also derive MOMENTUM_DAMPING from YoY volatility
+            # High volatility -> more damping (lower damping factor)
+            yoy_volatility = np.std(np.exp(y))
+            self.momentum_damping = np.clip(1.0 - (yoy_volatility * 0.5), 0.7, 0.98)
+            
+            print(f"Learned Inertia Weights: Rev={self.inertia_params['w_rev']:.3f}, Order={self.inertia_params['w_order']:.3f}, AOV={self.inertia_params['w_aov']:.3f}")
+            print(f"Inertia Confidence (R2): {r_squared:.3f} -> Trust Weight: {self.inertia_trust_weight:.2f}")
+            print(f"Data-driven Damping: {self.momentum_damping:.3f} (based on YoY volatility {yoy_volatility:.3f})")
+            
+        except Exception as e:
+            print(f"Regression failed: {e}. Falling back to default heuristics.")
+            self.inertia_trust_weight = 0.8
+            self.momentum_damping = 0.9
 
     def _calculate_growth_calibration(self, df: pd.DataFrame):
         """
@@ -83,11 +291,11 @@ class ForecastingPipeline:
         """
         # 1. Setup Data & Signaling
         max_date = df['Date'].max()
-        traffic = pd.read_parquet('data/processed/web_traffic.parquet')
+        traffic = pd.read_parquet(Config.WEB_TRAFFIC_FILE)
         traffic['date'] = pd.to_datetime(traffic['date'])
         traffic = traffic[traffic['date'] <= max_date]
         
-        orders = pd.read_parquet('data/processed/orders.parquet')
+        orders = pd.read_parquet(Config.ORDERS_FILE)
         orders['order_date'] = pd.to_datetime(orders['order_date'])
         orders = orders[orders['order_date'] <= max_date]
         
@@ -95,168 +303,254 @@ class ForecastingPipeline:
         daily_orders = orders.groupby('order_date')['order_id'].count()
         daily_rev = df.groupby('Date')['Revenue'].sum()
         
-        # Get discovered signals from the feature extractor
-        event_map = self.revenue_pipeline.named_steps['features'].event_score_map
-        
-        def is_signaled(dates):
-            # Paydays (25-5) or Discovered Events
-            return (dates.day >= 25) | (dates.day <= 5) | \
+        def is_signaled_local(dates):
+            # Paydays End (25-31), Wednesdays, or Discovered Events
+            event_map = self.revenue_pipeline.named_steps['features'].event_score_map
+            return (dates.day >= 25) | (dates.dayofweek == 2) | \
                    (dates.map(lambda x: (x.month, x.day) in event_map))
 
-        # 2. Dynamic Momentum Window Discovery (using All Days for stability)
-        candidate_windows = [90, 180, 270, 365]
+        # 2. Dynamic Momentum Window Discovery
         window_results = []
-        
-        for w in candidate_windows:
+        for w in Config.MOMENTUM_WINDOWS:
             curr_start = max_date - pd.Timedelta(days=w)
             ref_start, ref_end = curr_start - pd.DateOffset(years=1), max_date - pd.DateOffset(years=1)
             
             if ref_start < daily_traffic.index.min(): continue
             
-            # Helper to calculate tri-factor lift for a mask
+            # Helper to calculate Bi-Factor Lift (Non-Circular: Traffic + Orders + AOV)
             def get_lift(mask_name):
                 lifts = []
-                for factor_data, date_col in [(daily_traffic, 'index'), (daily_orders, 'index'), (daily_rev, 'index')]:
+                for factor_data in [daily_orders, daily_rev / (daily_orders + 1e-6)]:
                     curr_vals = factor_data[(factor_data.index > curr_start) & (factor_data.index <= max_date)]
                     ref_vals = factor_data[(factor_data.index > ref_start) & (factor_data.index <= ref_end)]
                     
-                    # Apply specific mask (e.g. all days, or just event days)
                     if mask_name == 'event':
-                        curr_vals = curr_vals[is_signaled(curr_vals.index)]
-                        ref_vals = ref_vals[is_signaled(ref_vals.index)]
+                        curr_vals = curr_vals[is_signaled_local(curr_vals.index)]
+                        ref_vals = ref_vals[is_signaled_local(ref_vals.index)]
                     
                     c_mean, r_mean = curr_vals.mean(), ref_vals.mean()
                     lifts.append(c_mean / (r_mean + 1e-6) if not (np.isnan(c_mean) or np.isnan(r_mean)) else 1.0)
                 
-                # Combined Growth: Sessions * (Orders/Sessions) * (Rev/Orders)
-                # This simplifies to Rev_curr / Rev_ref
-                return np.clip(np.prod(lifts), 0.5, 2.5), np.std(lifts)
+                return np.clip(np.prod(lifts), Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX), np.std(lifts)
 
             base_g, base_std = get_lift('all')
             window_results.append({'window': w, 'base_g': base_g, 'cv': base_std / (base_g + 1e-6)})
 
-        # 3. Final Selection & Momentum calculation (Recent-Weighted & Tightly Separated)
+        # 3. Final Selection & Momentum calculation
+        if not window_results:
+            print("Warning: No valid momentum windows found. Using default 1.0x.")
+            self.momentum = {'base': 1.0, 'event': 1.0, 'max_train_year': max_date.year}
+            return
+
         best_res = min(window_results, key=lambda x: x['cv'])
         w = best_res['window']
         
-        def get_weighted_tri_factor(start, end, mode='all'):
-            # Standardized Tri-Factor Components (Aligned per series)
+        # Ensure we use the best window parameters for final multipliers
+        curr_start = max_date - pd.Timedelta(days=w)
+        ref_start, ref_end = curr_start - pd.DateOffset(years=1), max_date - pd.DateOffset(years=1)
+
+        def get_direct_rev_momentum(start, end, mode='all'):
             stats = {}
             for p_name, (p_start, p_end) in {'curr': (start, end), 'ref': (ref_start, ref_end)}.items():
-                def get_aligned_avg(series, start_d, end_d):
-                    if series.empty: return 1e-6
-                    m = (series.index > start_d) & (series.index <= end_d)
-                    if mode == 'event': m &= is_signaled(series.index)
-                    elif mode == 'base': m &= ~is_signaled(series.index)
+                def get_weighted_rev(series, start_d, end_d):
+                    full_range = pd.date_range(start=start_d + pd.Timedelta(days=1), end=end_d)
+                    if mode == 'event': full_range = full_range[is_signaled_local(full_range)]
+                    elif mode == 'base': full_range = full_range[~is_signaled_local(full_range)]
                     
-                    subset = series[m]
-                    if subset.empty: return 1e-6
+                    if full_range.empty: return 0.0, 1e-6
                     
-                    # Helper for weighted average (Exponential decay towards end of period)
-                    days_diff = (end_d - subset.index).days
-                    weights = np.exp(-days_diff / 120.0)
-                    return np.average(subset, weights=weights)
+                    days_diff = (end_d - full_range).days
+                    weights = np.exp(-days_diff / float(Config.MOMENTUM_DECAY_DAYS))
+                    total_w = np.sum(weights)
+                    
+                    weighted_data = series.reindex(full_range, fill_value=0.0) * weights
+                    return np.sum(weighted_data), total_w
                 
-                avg_s = get_aligned_avg(daily_traffic, p_start, p_end)
-                avg_o = get_aligned_avg(daily_orders, p_start, p_end)
-                avg_r = get_aligned_avg(daily_rev, p_start, p_end)
-                
-                stats[p_name] = {
-                    'sessions': avg_s,
-                    'cr': avg_o / (avg_s + 1e-6),
-                    'aov': avg_r / (avg_o + 1e-6)
-                }
+                sum_r, w_r = get_weighted_rev(daily_rev, p_start, p_end)
+                stats[p_name] = sum_r / (w_r + 1e-6)
             
-            # Calculate final compounding lift
-            t_lift = stats['curr']['sessions'] / stats['ref']['sessions']
-            cr_lift = stats['curr']['cr'] / stats['ref']['cr']
-            aov_lift = stats['curr']['aov'] / stats['ref']['aov']
-            
-            return np.clip(t_lift * cr_lift * aov_lift, 0.5, 2.5), f"T={t_lift:.2f}, CR={cr_lift:.2f}, AOV={aov_lift:.2f}"
+            lift = stats['curr'] / (stats['ref'] + 1e-6)
+            return np.clip(lift, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
 
-        # 4. Store Multipliers
+        # --- Dynamic Multi-Factor Inertia Calculation ---
+        # 1. Get latest complete Q4 signals
+        q4_data = df[df['Date'].dt.month >= 10].copy()
+        q4_rev_sum = q4_data.groupby(q4_data['Date'].dt.year)['Revenue'].sum()
+        
+        orders_full = pd.read_parquet(Config.ORDERS_FILE)
+        orders_full['order_date'] = pd.to_datetime(orders_full['order_date'])
+        q4_orders_sum = orders_full[orders_full['order_date'].dt.month >= 10].groupby(orders_full['order_date'].dt.year)['order_id'].count()
+        
+        avail_years = sorted(list(set(q4_rev_sum.index) & set(q4_orders_sum.index)))
+        last_yr = avail_years[-1]
+        prev_yr = avail_years[-2]
+        
+        log_m_rev = np.log(q4_rev_sum[last_yr] / (q4_rev_sum[prev_yr] + 1e-6) + 1e-6)
+        log_m_order = np.log(q4_orders_sum[last_yr] / (q4_orders_sum[prev_yr] + 1e-6) + 1e-6)
+        log_m_aov = log_m_rev - log_m_order
+        
+        # 2. Apply Learned Regression Model: M = exp(intercept + sum(w_i * log_m_i))
+        p = self.inertia_params
+        log_calibrated = p['intercept'] + (p['w_rev'] * log_m_rev) + (p['w_order'] * log_m_order) + (p['w_aov'] * log_m_aov)
+        calibrated_m = np.exp(log_calibrated)
+        
+        # Stability Damping
+        calibrated_m = np.clip(calibrated_m, 0.7, 1.8)
+        
         self.momentum = {}
-        self.momentum['base'], base_audit = get_weighted_tri_factor(curr_start, max_date, 'base')
-        self.momentum['event'], event_audit = get_weighted_tri_factor(curr_start, max_date, 'event')
+        raw_base_m = get_direct_rev_momentum(curr_start, max_date, 'base')
+        raw_event_m = get_direct_rev_momentum(curr_start, max_date, 'event')
+        
+        # Final Blend: Weight based on dynamically discovered trust factor
+        i_w = self.inertia_trust_weight
+        self.momentum['base']  = np.clip(raw_base_m * (1 - i_w) + calibrated_m * i_w, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
+        self.momentum['event'] = np.clip(raw_event_m * (1 - i_w) + calibrated_m * i_w, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
         self.momentum['max_train_year'] = max_date.year
         
-        # 5. Monthly Seasonality Bias
-        m_curr = df[df['Date'].dt.year == max_date.year].groupby(df['Date'].dt.month)['Revenue'].mean()
-        m_prev = df[df['Date'].dt.year == (max_date.year-1)].groupby(df['Date'].dt.month)['Revenue'].mean()
-        self.seasonal_bias = (m_curr / (m_prev.replace(0, np.nan) * self.momentum['base'])).fillna(1.0).to_dict()
-        
-        print(f"Momentum Discovered (Weighted Window: {w}d):")
-        print(f" > Base  (Normal): {self.momentum['base']:.3f}x ({base_audit})")
-        print(f" > Event (Signaled): {self.momentum['event']:.3f}x ({event_audit})")
+        print(f"Dynamic Inertia Applied (Calibrated M: {calibrated_m:.3f}x)")
 
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
-        print("Generating forecast...")
-        X = df[['Date']].copy()
+        print("Generating stationary recursive forecast (Optimized)...")
+        horizon = df[['Date']].copy().sort_values('Date').reset_index(drop=True)
         
-        preds_rev = self.revenue_pipeline.predict(X)
-        preds_ratio = self.cogs_pipeline.predict(X)
+        # Pre-calculate compounded multipliers and event signals for the entire horizon
+        max_train_year = self.momentum['max_train_year']
+        base_m = self.momentum['base']
+        event_m = self.momentum['event']
         
-        # Apply Dual-Momentum Calibration
-        if hasattr(self, 'momentum'):
-            years_out = X['Date'].dt.year - self.momentum['max_train_year']
-            months = X['Date'].dt.month
-            days = X['Date'].dt.day
+        horizon['year'] = horizon['Date'].dt.year
+        horizon_years = sorted(horizon['year'].unique())
+        year_multipliers = {}
+        running_m_base, running_m_event = 1.0, 1.0
+        
+        for yr in horizon_years:
+            years_out = yr - max_train_year
+            damp = self.momentum_damping ** max(0, years_out - 1)
+            running_m_base *= (base_m ** damp)
+            running_m_event *= (event_m ** damp)
+            year_multipliers[yr] = {'base': running_m_base, 'event': running_m_event}
+
+        # Pre-calculate event signals for the whole horizon
+        is_event_horizon = self._is_signaled(horizon['Date']).values
+        
+        # Pre-transform non-lag features using a dummy DataFrame to satisfy the transformer
+        horizon_dummy = horizon.copy()
+        for col in self.lag_features:
+            horizon_dummy[col] = 0.0
+        
+        # X_horizon will contain all features in the correct order
+        X_horizon = self.revenue_pipeline.named_steps['features'].transform(horizon_dummy)
+        
+        # Use lists for faster buffer management during recursion
+        history_rev = list(self.history_norm['Revenue'].values)
+        history_ratio = list(self.history_norm['COGS'].values)
+        
+        preds_rev = []
+        preds_cogs = []
+        
+        # Cache model references for speed
+        rev_model = self.revenue_pipeline.named_steps['model']
+        cogs_model = self.cogs_pipeline.named_steps['model']
+        
+        # Recursive Loop
+        for i in range(len(horizon)):
+            # 1. Update lag features in-place (First 3 columns)
+            lag_1 = history_rev[-1]
+            lag_7 = history_rev[-7]
+            roll_7 = sum(history_rev[-7:]) / 7.0
             
-            # Identify signaled days in prediction set
-            event_map = self.revenue_pipeline.named_steps['features'].event_score_map
-            is_event = (days >= 25) | (days <= 5) | (X['Date'].map(lambda x: (x.month, x.day) in event_map))
+            # Using .iloc[i, col_idx] is faster than updating the whole row
+            X_horizon.iloc[i, 0] = lag_1
+            X_horizon.iloc[i, 1] = lag_7
+            X_horizon.iloc[i, 2] = roll_7
             
-            # Apply multipliers
-            base_mult = self.momentum['base'] ** years_out
-            event_mult = self.momentum['event'] ** years_out
+            # 2. Model Prediction
+            current_X = X_horizon.iloc[[i]]
+            raw_norm_rev = rev_model.predict(current_X)[0]
+            raw_ratio = cogs_model.predict(current_X)[0]
+            raw_ratio = float(np.clip(raw_ratio, self.cogs_ratio_clip[0], self.cogs_ratio_clip[1]))
             
-            final_mult = np.where(is_event, event_mult, base_mult)
+            # 3. Scaling
+            curr_date = horizon.iloc[i]['Date']
+            curr_year = horizon.iloc[i]['year']
+            is_event = is_event_horizon[i]
             
-            # Apply Monthly Bias & Growth
-            bias = X['Date'].dt.month.map(self.seasonal_bias).fillna(1.0)
-            preds_rev = preds_rev * final_mult * bias
+            effective_m = year_multipliers[curr_year]['event' if is_event else 'base']
+            
+            final_rev = max(0, raw_norm_rev * self.base_scale_rev * effective_m)
+            final_cogs = max(0, final_rev * raw_ratio)
+            
+            preds_rev.append(final_rev)
+            preds_cogs.append(final_cogs)
+            
+            # 4. Update Buffer (normalized values)
+            history_rev.append(raw_norm_rev)
+            history_ratio.append(raw_ratio)
             
         return pd.DataFrame({
-            'Date': df['Date'],
-            'Revenue': np.maximum(0, preds_rev),
-            'COGS': np.maximum(0, preds_rev * preds_ratio)
+            'Date': horizon['Date'],
+            'Revenue': preds_rev,
+            'COGS':    preds_cogs
         })
 
-    def _smooth_training_outliers(self, df: pd.DataFrame):
+    def _apply_data_driven_weights(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Detects and heals monthly outliers based on YoY growth ratios.
-        This handles events like the 2021 lockdown by normalizing them to the growth trend.
+        Calculates weights for each sample based on:
+        1. Recency (Trust recent data more)
+        2. Efficiency Consistency (Discount anomalies in Rev/Sessions ratio relative to yearly median)
         """
+        print("Calculating Data-driven Sample Weights...")
         df = df.copy()
+        
+        # A. Recency Weight
+        start_date_ref = df['Date'].min()
+        days_from_start = (df['Date'] - start_date_ref).dt.days
+        max_days = days_from_start.max()
+        recency_weight = np.exp((days_from_start - max_days) / (365.0 * Config.DECAY_HALF_LIFE_YEARS))
+        
+        # B. Anomaly Weight (Efficiency Ratio context)
+        # 1. Load Traffic for alignment
+        traffic = pd.read_parquet(Config.WEB_TRAFFIC_FILE)
+        traffic['date'] = pd.to_datetime(traffic['date'])
+        daily_traffic = traffic.groupby('date')['sessions'].sum()
+        
+        # 2. Monthly Stats for Z-Score
         df['year'] = df['Date'].dt.year
         df['month'] = df['Date'].dt.month
+        df['sessions'] = df['Date'].map(daily_traffic).fillna(1e-6)
         
-        # 1. Calculate Monthly Revenue
-        monthly_rev = df.groupby(['year', 'month'])['Revenue'].sum().reset_index()
-        monthly_rev = monthly_rev.sort_values(['year', 'month'])
+        # We need Revenue to compute the ratio (y is available in df at this point of fit)
+        # However, for training we use the target y. Let's use the actual Revenue before normalization if possible.
+        # But wait, df here is df_lags which has normalized Revenue.
+        # Let's map back to annual scale to get raw revenue for the ratio.
+        df['raw_rev'] = df['Revenue'] * df['year'].map(self.annual_scales_rev)
         
-        # 2. Calculate YoY Growth Ratios
-        monthly_rev['prev_year_rev'] = monthly_rev.groupby('month')['Revenue'].shift(1)
-        monthly_rev['yoy_ratio'] = monthly_rev['Revenue'] / (monthly_rev['prev_year_rev'] + 1e-6)
+        monthly_stats = df.groupby(['year', 'month']).agg({
+            'raw_rev': 'sum',
+            'sessions': 'sum'
+        }).reset_index()
+        monthly_stats['eff_ratio'] = monthly_stats['raw_rev'] / (monthly_stats['sessions'] + 1e-6)
         
-        # 3. Identify Outliers (Ratio < 0.6 or > 1.8)
-        # We also calculate the median ratio per year to see the 'Normal' growth
-        median_ratio = monthly_rev['yoy_ratio'].median()
-        is_outlier = (monthly_rev['yoy_ratio'] < 0.6) | (monthly_rev['yoy_ratio'] > 1.8)
+        # Yearly Median/Std for Ratio
+        yearly_meta = monthly_stats.groupby('year')['eff_ratio'].agg(['median', 'std']).reset_index()
+        yearly_meta.columns = ['year', 'y_median', 'y_std']
         
-        outliers = monthly_rev[is_outlier].copy()
-        if not outliers.empty:
-            print(f"Detected {len(outliers)} monthly outliers. Smoothing to median growth ({median_ratio:.2f}x)...")
-            for idx, row in outliers.iterrows():
-                yr, mt = row['year'], row['month']
-                target_rev = row['prev_year_rev'] * median_ratio
-                correction_factor = target_rev / (row['Revenue'] + 1e-6)
-                
-                # Apply correction factor to daily data for this specific month
-                mask = (df['year'] == yr) & (df['month'] == mt)
-                df.loc[mask, 'Revenue'] *= correction_factor
+        monthly_stats = pd.merge(monthly_stats, yearly_meta, on='year')
+        monthly_stats['z_score'] = (monthly_stats['eff_ratio'] - monthly_stats['y_median']).abs() / (monthly_stats['y_std'] + 1e-6)
+        monthly_stats['outlier_weight'] = 1.0 / (1.0 + monthly_stats['z_score'])
         
-        return df
+        # 3. Map weights back to daily rows (Vectorized)
+        weight_map = monthly_stats.set_index(['year', 'month'])['outlier_weight'].to_dict()
+        
+        # Using a MultiIndex map is significantly faster than .apply(axis=1)
+        df_index = pd.MultiIndex.from_arrays([df['year'], df['month']])
+        outlier_weights = df_index.map(weight_map).fillna(1.0)
+        
+        # Combine
+        df['sample_weight'] = recency_weight * outlier_weights
+        
+        # Clean up temp columns
+        return df.drop(columns=['raw_rev', 'sessions', 'year', 'month'])
 
 def run_baseline():
     print("--- Starting Baseline Pipeline ---")

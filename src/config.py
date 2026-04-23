@@ -13,14 +13,33 @@ class Config:
 
     # Files
     SALES_TRAIN_FILE = PROCESSED_DATA_DIR / "sales.parquet"
+    WEB_TRAFFIC_FILE = PROCESSED_DATA_DIR / "web_traffic.parquet"
+    ORDERS_FILE = PROCESSED_DATA_DIR / "orders.parquet"
     
     # Core Baseline Hyperparameters
     LGBM_N_ESTIMATORS = 2000
     LGBM_LR = 0.01
-    LGBM_NUM_LEAVES = 127
+    LGBM_NUM_LEAVES = 63
     
     # Target and Features
     DATE_COL = "Date"
+    
+    # Forecasting Pipeline Hyperparameters
+    DECAY_HALF_LIFE_YEARS = 1.5
+    REC_HISTORY_WINDOW = 60
+    REC_LAG_WINDOW = 30
+    
+    # Momentum & Scaling
+    MOMENTUM_WINDOWS = [90, 180, 270, 365]
+    MOMENTUM_DECAY_DAYS = 180
+    MOMENTUM_CLIP_MIN = 0.5
+    MOMENTUM_CLIP_MAX = 2.0
+    
+    # Discovery & Cleaning
+    EVENT_LIFT_THRESHOLD = 1.10
+    EVENT_MIN_OCCURRENCES = 5
+    TET_WINDOW_DAYS = 2
+    TET_CONTAMINATION_DAYS = 15
     
     @classmethod
     def initialize_dirs(cls):

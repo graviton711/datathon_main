@@ -95,6 +95,11 @@ This file preserves all statistically verified findings and business insights di
 - **Finding**: The problem is **Frequency and Retention**, not the spend amount per transaction. We are losing "People", not "Wallet Share" per person.
 | 2026-04-20 | Universal Failure: All regions (East, Central, West) collapsed simultaneously in 2019. | `18_regional_order_trend.png` | Collapse is structural/national, not a localized logistics issue. |
 | 2026-04-20 | Price-Volume Mismatch: Massive price hikes in 2018-2020 accelerated volume drop. | `19_price_elasticity.png` | Pricing strategy was counter-productive during the quality crisis. |
+| 2026-04-23 | Silent Bug Fix A: `prev_q4_momentum` now computed from raw Revenue pre-normalization. | Pipeline refactor in `src/training/pipeline.py` + injected map into `BaselineFeatureExtractor`. | Removed sign-flip risk in Q4 growth signal; momentum feature now represents market growth direction. |
+| 2026-04-23 | Silent Bug Fix B: 2024 horizon no longer defaults to zero momentum from missing dict key. | Runtime check: 2024 rows with `prev_q4_momentum == 0.0` reduced to 0/183. | Eliminated out-of-distribution artifact in late-horizon features. |
+| 2026-04-23 | Ghost Feature Fix C: `year` removed from model input schema. | Transformer output inspection (`has_year False`) and feature-contract validation guard. | Prevented train/inference mismatch and accidental extrapolation shortcut on calendar year. |
+| 2026-04-23 | COGS branch refactored to ratio target (`COGS/Revenue`) with quantile clipping. | Walk-forward run on 2021-2022 after refactor. | Improved stability of COGS predictions under structural seasonality shifts. |
+| 2026-04-23 | Walk-forward score after bug-fix package: Total MAE = 1,327,352. | `src/evaluation/evaluate.py` output: Revenue MAE 691,451; COGS MAE 635,901. | Net improvement vs prior 1.37M baseline; fixes are production-viable. |
 
 ## Regional Trends & Price Elasticity (Phase 3)
 

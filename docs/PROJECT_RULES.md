@@ -65,3 +65,8 @@ To ensure everyone is running the exact same entry points, use the following com
   python -m src.training.pipeline
   ```
   *(This trains the `ForecastingPipeline` on ALL available data up to 2022 and predicts the 2023-2024 horizon, outputting to `submissions/submission.csv`).*
+
+## 13. Score Discrepancy Awareness
+- **Local vs. Leaderboard**: Be aware that Local MAE evaluation is significantly different from the Leaderboard score (Local scores are often much better/lower). 
+- **VỀ BEST**: data/best_submit/best_750k.csv = bản submission tham khảo tải về từ leaderboard của team khác, không phải code của chúng ta.
+- **Caution**: Do not rely solely on Local MAE for final performance expectations; always validate with Leaderboard submissions while using CV for relative improvement tracking.
