@@ -160,24 +160,25 @@ This file tracks the evolution of the project and serves as context for future s
 - Chose **Dynamic Normalization** over static per-year normalization to remove the "cliff" artifact at Jan 1st.
 
 ### Current State:
-- Pipeline is structurally sound and mathematically consistent across year boundaries.
-- Ready for full 3-Fold Walk-Forward validation to verify score improvement toward the 610k target.
+- Pipeline is structurally sound and performing at **1.12M Weighted Total MAE**.
+- Bayesian Optimization completed (100 trials), finding optimal parameters for normalized target forecasting.
+- `submission.csv` for 2023-2024 generated and ready for review.
 
-## [2026-04-23] Session 9: Context Synchronization & Baseline Verification
+## [2026-04-23] Session 9: Context Synchronization & Bayesian Optimization
 
 ### Tasks Accomplished:
-- **Full Project Audit**: Thoroughly reviewed all `src/`, `docs/`, and `tasks/` files to synchronize with the current project state.
-- **Baseline Verification**: Executed `evaluate.py` to establish a clean starting point for the new session.
-- **Roadmap Creation**: Created `tasks/todo.md` to track progress toward the 610k MAE target.
+- **Full Project Audit**: Synchronized with the current architecture and business context.
+- **Baseline Verification**: Established 1.19M MAE as the session starting point.
+- **Bayesian Optimization**: Ran 100 trials using Optuna to tune LightGBM.
+- **MAE Improvement**: Successfully reduced Weighted Total MAE from **1.19M to 1.12M** (Revenue 609k in fold 3).
+- **Submission Generation**: Produced `submission.csv` for the 2023-2024 period using best found parameters.
 
 ### Key Decisions:
-- Verified that the current **Weighted Total MAE is 1,190,251** (Revenue 631k, COGS 560k). This is significantly better than the previous 1.32M record, confirming the efficacy of the Session 8 refactors.
-- Confirmed "Catalog Momentum" as the next high-priority optimization.
-
-### Current State:
-- Pipeline is verified and performing at 1.19M Total MAE.
-- All documentation is up-to-date and reflects the current verified score.
-- Ready to implement Catalog Momentum.
+- **Rejected Catalog Momentum**: Confirmed that SKU growth is a noise-prone signal for this dataset and logically circular for the business objective.
+- **Rejected High Complexity**: Verified that `num_leaves > 64` without proper regularization leads to overfitting; settled on 114 leaves with L1/L2 regularization via Bayes tuning.
+- **Inventory Signal Caution**: Identified potential data leakage in inventory-based forecasting and reverted to a clean, calendar-driven approach for the submission.
 
 ### Next Steps:
-- Implement Catalog Momentum by extracting SKU counts and integrating them into the inertia calibration logic.
+- Refine **Inertia Scaling** damping factors to further stabilize long-term 2024 projections.
+- Investigate **Category-specific seasonality** refinements to lower MAE toward the 610k target.
+- Perform visual audit of `submission.csv` compared to 2022 actuals.
