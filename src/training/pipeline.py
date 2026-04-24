@@ -168,8 +168,8 @@ class ForecastingPipeline:
         ratio_q99 = float(np.quantile(y_cogs, 0.99))
         self.cogs_ratio_clip = (ratio_q01, ratio_q99)
         
-        # Feature columns
-        X = df_lags[self.feature_cols].copy()
+        # Feature columns (Include Revenue for extractor discovery, it will be dropped in transform)
+        X = df_lags[self.feature_cols + ['Revenue']].copy()
         
         fit_params = {
             'model__categorical_feature': self.categorical_features,

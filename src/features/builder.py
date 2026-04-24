@@ -17,6 +17,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         self.event_score_map = {} # (month, day) -> median_lift
         self.category_profile_map = {} # month -> {cat: share}
         self.categories_ = [] # Dynamic list of categories
+        self.latest_peak_lift = 1.0 # Momentum of the last major campaign
         
         # Lunar New Year (Mung 1) dictionary
         self.tet_dates = {
@@ -64,6 +65,8 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
             # 5. Category Profile Discovery
             if not self.category_profile_map:
                 self._discover_category_profiles(self.max_date_ref)
+            # 6. Peak Momentum Discovery
+            self._discover_peak_momentum(df)
         
         return self
 
@@ -91,6 +94,26 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
             return self.q4_momentum_dict[max(known_years)]
 
         return self.q4_momentum_default
+
+    def _discover_peak_momentum(self, df):
+        """
+        Identifies the strength of the last major campaign to carry forward as momentum.
+        """
+        # Find days with significant lift (> 2.0)
+        # We use the lift already calculated in _discover_event_scores if possible, 
+        # or recalculate it here relative to yearly median for robustness.
+        df = df.copy().sort_values(self.date_col)
+        yearly_medians = df.groupby(df[self.date_col].dt.year)[self.rev_col].transform('median')
+        df['rel_lift'] = df[self.rev_col] / (yearly_medians + 1e-6)
+        
+        peaks = df[df['rel_lift'] > 2.0]
+        if not peaks.empty:
+            self.latest_peak_lift = float(peaks['rel_lift'].iloc[-1])
+            # Clip to reasonable range to avoid extreme outliers
+            self.latest_peak_lift = np.clip(self.latest_peak_lift, 1.0, 10.0)
+            print(f"Peak Momentum Discovered: {self.latest_peak_lift:.2f}x (from {peaks[self.date_col].iloc[-1].date()})")
+        else:
+            self.latest_peak_lift = 1.0
 
     def _discover_event_scores(self, df):
         """
@@ -200,6 +223,29 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         year_momentum_map = {y: self._resolve_prev_q4_momentum(y) for y in unique_years}
         X['prev_q4_momentum'] = X['year'].map(year_momentum_map)
 
+        # 4. Peak Momentum Signal (Dynamic)
+        # We need a running last peak lift that updates within the dataset
+        if self.rev_col in X.columns:
+            # During training/fit
+            X_tmp = X.copy()
+            # Calculate a quick monthly-baseline lift for momentum discovery
+            monthly_m = X_tmp.groupby(['year', 'month'])[self.rev_col].transform('mean')
+            X_tmp['lift_tmp'] = X_tmp[self.rev_col] / (monthly_m + 1e-6)
+            
+            X_tmp['is_peak_tmp'] = (X_tmp['lift_tmp'] > 2.0)
+            X_tmp['peak_val_tmp'] = np.where(X_tmp['is_peak_tmp'], X_tmp['lift_tmp'], np.nan)
+            X['peak_momentum_val'] = pd.Series(X_tmp['peak_val_tmp']).shift(1).ffill().fillna(1.0).values
+        else:
+            # During predict/inference
+            X['peak_momentum_val'] = self.latest_peak_lift
+
+        X['peak_momentum'] = X['event_score'] * X['peak_momentum_val']
+        X = X.drop(columns=['peak_momentum_val'])
+
+        # 5. Precise Biennial Signal (Urban Blowout Gate)
+        # Only active in August of odd years.
+        X['is_odd_year_aug'] = ((X['year'] % 2 != 0) & (X['month'] == 8)).astype(int)
+
         # Add Cyclic Encoding for Day and Month
         days_in_month = X[self.date_col].dt.days_in_month
         X['day_sin'] = np.sin(2 * np.pi * X['day'] / days_in_month)
@@ -230,5 +276,5 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         # Cyclic features are added after category shares
         cyclic_features = ['day_sin', 'day_cos', 'month_sin', 'month_cos']
         
-        # prev_q4_momentum is added last in transform()
-        return base_features + cat_features + cyclic_features + ['prev_q4_momentum']
+        # prev_q4_momentum and peak_momentum are added last
+        return base_features + cat_features + cyclic_features + ['prev_q4_momentum', 'peak_momentum', 'is_odd_year_aug']
