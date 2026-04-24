@@ -29,10 +29,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def mean_absolute_percentage_error(y_true, y_pred):
-    mask = y_true > 0
-    if not mask.any(): return 0.0
-    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+# Ensure necessary directories exist
+Config.initialize_dirs()
+
+# Load data once outside objective to save IO
+logger.info("Loading sales data...")
+raw_sales_global = pd.read_parquet(Config.SALES_TRAIN_FILE)
+raw_sales_global['Date'] = pd.to_datetime(raw_sales_global['Date'])
 
 def objective(trial):
     # 1. Define Search Space
@@ -50,15 +53,12 @@ def objective(trial):
         'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
         'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
         'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
-        'n_estimators': 2000 # Fixed for consistency, or we could tune it
+        'n_estimators': 2000 # Fixed for consistency
     }
     
-    logger.info(f"Trial {trial.number} started with params: {json.dumps(trial.params, indent=2)}")
+    logger.info(f"Trial {trial.number} started...")
     
     # 2. Run 3-Fold Walk-Forward CV
-    raw_sales = pd.read_parquet(Config.SALES_TRAIN_FILE)
-    raw_sales['Date'] = pd.to_datetime(raw_sales['Date'])
-    
     folds = [
         {'train_max_year': 2019, 'test_start': 2020, 'test_end': 2020, 'weight': 0.2},
         {'train_max_year': 2020, 'test_start': 2021, 'test_end': 2021, 'weight': 0.3},
@@ -72,8 +72,8 @@ def objective(trial):
         test_start_date = pd.to_datetime(f"{fold['test_start']}-01-01")
         test_end_date = pd.to_datetime(f"{fold['test_end']}-12-31")
         
-        train_df = raw_sales[raw_sales['Date'] <= train_end_date].copy()
-        test_df = raw_sales[(raw_sales['Date'] >= test_start_date) & (raw_sales['Date'] <= test_end_date)].copy()
+        train_df = raw_sales_global[raw_sales_global['Date'] <= train_end_date].copy()
+        test_df = raw_sales_global[(raw_sales_global['Date'] >= test_start_date) & (raw_sales_global['Date'] <= test_end_date)].copy()
         
         pipeline = ForecastingPipeline()
         # Inject params into both models
@@ -101,12 +101,17 @@ def run_tuning(n_trials=100):
     logger.info(f"Best Trial Score: {study.best_value:,.0f}")
     logger.info(f"Best Params: {json.dumps(study.best_params, indent=2)}")
     
-    # Save best params to a file
-    best_params_path = PROJECT_ROOT / "models" / "best_params.json"
+    # Save best params to a file using Config
+    best_params_path = Config.MODEL_DIR / "best_params.json"
     with open(best_params_path, 'w') as f:
         json.dump(study.best_params, f, indent=2)
     
     logger.info(f"Best parameters saved to {best_params_path}")
 
 if __name__ == "__main__":
-    run_tuning(n_trials=100)
+    import argparse
+    parser = argparse.ArgumentParser(description='Hyperparameter tuning with Optuna')
+    parser.add_argument('--n-trials', type=int, default=100, help='Number of tuning trials')
+    args = parser.parse_args()
+    
+    run_tuning(n_trials=args.n_trials)

@@ -70,3 +70,12 @@ To ensure everyone is running the exact same entry points, use the following com
 - **Local vs. Leaderboard**: Be aware that Local MAE evaluation is significantly different from the Leaderboard score (Local scores are often much better/lower). 
 - **VỀ BEST**: data/best_submit/best_750k.csv = bản submission tham khảo tải về từ leaderboard của team khác, không phải code của chúng ta.
 - **Caution**: Do not rely solely on Local MAE for final performance expectations; always validate with Leaderboard submissions while using CV for relative improvement tracking.
+
+## 14. Operational Data Constraints (Critical)
+- **Zero Future Data**: We have ABSOLUTELY NO DATA for the 2023-2024 period (as specified in EXAM_V1.md). This includes sales, inventory, traffic, promotions, or any other table.
+- **Inference Reality**: The 2023-2024 horizon is a "blind" forecast.
+- **Feature Constraint**: Any feature used during inference (2023-2024) MUST be either:
+    1.  A calendar/temporal feature (Date, Month, etc.)
+    2.  A static historical profile derived from 2012-2022 data (e.g., Monthly median fill_rate).
+    3.  A recursive value (the model's own past predictions).
+- **Prohibited**: Never attempt to load or merge any data file for dates > 2022-12-31.

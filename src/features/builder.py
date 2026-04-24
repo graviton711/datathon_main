@@ -15,7 +15,9 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         self.q4_momentum_dict = {}
         self.q4_momentum_default = 0.0
         self.event_score_map = {} # (month, day) -> median_lift
+        self.category_event_map = {} # category -> {(month, day) -> median_lift}
         self.category_profile_map = {} # month -> {cat: share}
+        self.cogs_monthly_profile = {} # month -> median_ratio
         self.categories_ = [] # Dynamic list of categories
         self.latest_peak_lift = 1.0 # Momentum of the last major campaign
         
@@ -43,6 +45,16 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         else:
             self.q4_momentum_default = float(default_value)
 
+        return self
+
+    def set_cogs_monthly_profile(self, profile_map):
+        """Inject externally computed COGS monthly ratio profiles."""
+        self.cogs_monthly_profile = {int(k): float(v) for k, v in profile_map.items()}
+        return self
+
+    def set_category_event_map(self, category_event_map):
+        """Inject category-specific event lift maps."""
+        self.category_event_map = category_event_map
         return self
 
     def fit(self, X, y=None):
@@ -211,11 +223,27 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         event_map_vec = {m * 100 + d: score for (m, d), score in self.event_score_map.items()}
         X['event_score'] = X['mmdd'].map(event_map_vec).fillna(1.0)
         
-        # 2.5 Category Mix Signals
+        # 2.5 Category Mix & Specific Event Signals
         # Pre-calculate category share mapping dynamically
         for cat in self.categories_:
+            cat_lower = cat.lower()
+            cat_share_col = f'share_{cat_lower}'
+            
+            # Month share
             cat_map = {month: shares.get(cat, 0.0) for month, shares in self.category_profile_map.items()}
-            X[f'share_{cat.lower()}'] = X['month'].map(cat_map).fillna(0.0)
+            X[cat_share_col] = X['month'].map(cat_map).fillna(0.0)
+            
+            # Category-specific Event Score
+            cat_event_map = self.category_event_map.get(cat, {})
+            cat_event_map_vec = {m * 100 + d: score for (m, d), score in cat_event_map.items()}
+            cat_event_col = f'event_score_{cat_lower}'
+            X[cat_event_col] = X['mmdd'].map(cat_event_map_vec).fillna(1.0)
+            
+            # Interaction: How much this event impacts THIS specific category today
+            X[f'inter_{cat_lower}'] = X['event_score'] * X[cat_share_col]
+        
+        # COGS Ratio Profile
+        X['cogs_profile'] = X['month'].map(self.cogs_monthly_profile).fillna(0.85)
         
         # 3. Dynamic Trailing Momentum (prev_q4_momentum)
         # Pre-calculate a full map for all years in X to avoid expensive fallback logic per row
@@ -270,10 +298,14 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
     def get_feature_names(self):
         base_features = ['month', 'day', 'day_of_week', 'is_wednesday', 'is_weekend', 
                          'is_payday_start', 'is_payday_end', 'is_quarter_end',
-                         'days_to_tet', 'event_score']
-        cat_features = [f'share_{cat.lower()}' for cat in self.categories_]
+                         'days_to_tet', 'event_score', 'cogs_profile']
         
-        # Cyclic features are added after category shares
+        cat_features = []
+        for cat in self.categories_:
+            cat_lower = cat.lower()
+            cat_features.extend([f'share_{cat_lower}', f'event_score_{cat_lower}', f'inter_{cat_lower}'])
+        
+        # Cyclic features are added after category features
         cyclic_features = ['day_sin', 'day_cos', 'month_sin', 'month_cos']
         
         # prev_q4_momentum and peak_momentum are added last

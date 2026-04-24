@@ -127,6 +127,16 @@ class ForecastingPipeline:
             self.q4_momentum_map, self.q4_momentum_default
         )
         
+        # 0.1. Discover Category-Specific Events & COGS Profiles
+        print("Discovering Category-Specific Signals & COGS Profiles...")
+        cat_event_map = self._discover_category_event_scores(df)
+        cogs_profile = df.groupby(df['Date'].dt.month).apply(lambda x: (x['COGS'] / (x['Revenue'] + 1e-6)).median()).to_dict()
+        
+        self.revenue_pipeline.named_steps['features'].set_category_event_map(cat_event_map)
+        self.revenue_pipeline.named_steps['features'].set_cogs_monthly_profile(cogs_profile)
+        self.cogs_pipeline.named_steps['features'].set_category_event_map(cat_event_map)
+        self.cogs_pipeline.named_steps['features'].set_cogs_monthly_profile(cogs_profile)
+        
         # 1. Calculate Annual Scales
         self.annual_scales_rev = df.groupby('year')['Revenue'].median().to_dict()
         
@@ -188,6 +198,8 @@ class ForecastingPipeline:
         self.cogs_pipeline.named_steps['features'].event_score_map = extractor.event_score_map
         self.cogs_pipeline.named_steps['features'].category_profile_map = extractor.category_profile_map
         self.cogs_pipeline.named_steps['features'].categories_ = extractor.categories_
+        self.cogs_pipeline.named_steps['features'].category_event_map = extractor.category_event_map
+        self.cogs_pipeline.named_steps['features'].cogs_monthly_profile = extractor.cogs_monthly_profile
         
         print("Training COGS Ratio Model...")
         self.cogs_pipeline.fit(X, y_cogs, **fit_params)
@@ -291,6 +303,56 @@ class ForecastingPipeline:
             print(f"Regression failed: {e}. Falling back to default heuristics.")
             self.inertia_trust_weight = 0.8
             self.momentum_damping = 0.9
+
+    def _discover_category_event_scores(self, df: pd.DataFrame) -> dict:
+        """Vectorized scan to identify lifts per category on global event days."""
+        try:
+            # 1. Load context & Filter by max_date to avoid LEAKAGE
+            max_date = df['Date'].max()
+            orders = pd.read_parquet(Config.ORDERS_FILE)[['order_id', 'order_date']]
+            orders['order_date'] = pd.to_datetime(orders['order_date'])
+            orders = orders[orders['order_date'] <= max_date] # Strict temporal isolation
+            
+            items = pd.read_parquet(Config.DATA_DIR / "processed" / "order_items.parquet")[['order_id', 'product_id', 'quantity', 'unit_price', 'discount_amount']]
+            products = pd.read_parquet(Config.DATA_DIR / "processed" / "products.parquet")[['product_id', 'category']]
+            
+            # Filter items to only include orders within the allowed timeframe
+            items = items[items['order_id'].isin(orders['order_id'])]
+            
+            items['item_rev'] = items['quantity'] * items['unit_price'] - items['discount_amount']
+            df_cat = pd.merge(items, orders, on='order_id')
+            df_cat = pd.merge(df_cat, products, on='product_id')
+            
+            # 2. Daily Category Rev
+            cat_daily = df_cat.groupby(['order_date', 'category'])['item_rev'].sum().unstack().fillna(0)
+            
+            # 3. Calculate Lifts
+            cat_event_map = {}
+            # Global event days from existing revenue pipeline discovery (if already fitted) or dummy local one
+            # Here we'll just discover them on the fly based on the global revenue provided in `df`
+            df = df.copy()
+            df['month'] = df['Date'].dt.month
+            df['year'] = df['Date'].dt.year
+            monthly_m = df.groupby(['year', 'month'])['Revenue'].transform('mean')
+            global_lift = df['Revenue'] / (monthly_m + 1e-6)
+            event_days = df.loc[global_lift > Config.EVENT_LIFT_THRESHOLD, 'Date']
+            
+            for cat in cat_daily.columns:
+                s = cat_daily[cat]
+                # Use daily index for month-level transform
+                s_monthly_m = s.groupby([s.index.year, s.index.month]).transform('mean')
+                s_lift = s / (s_monthly_m + 1e-6)
+                
+                # Filter for event days and group by (month, day)
+                s_event = s_lift.reindex(event_days).dropna()
+                s_event_stats = s_event.groupby([s_event.index.month, s_event.index.day]).median()
+                
+                cat_event_map[cat] = s_event_stats.to_dict()
+                
+            return cat_event_map
+        except Exception as e:
+            print(f"Warning: Category event discovery failed ({e}). Returning empty map.")
+            return {}
 
     def _calculate_growth_calibration(self, df: pd.DataFrame):
         """
