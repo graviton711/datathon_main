@@ -206,8 +206,10 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         X['is_wednesday'] = (X['day_of_week'] == 2).astype(int)
         X['is_weekend'] = (X['day_of_week'] >= 5).astype(int)
         
-        # 2. Payday & Quarter Signals
-        X['is_payday_start'] = ((X['day'] >= 1) & (X['day'] <= 5)).astype(int)
+        # 2. Payday & Quarter Signals (Refined based on verified intra-month seasonality)
+        # Day 1 is the peak residual payday. Day 4 is the structural slump (stockout/fatigue).
+        X['is_payday_peak'] = ((X['day'] >= 1) & (X['day'] <= 2)).astype(int)
+        X['is_payday_slump'] = ((X['day'] >= 4) & (X['day'] <= 5)).astype(int)
         X['is_payday_end'] = (X['day'] >= 25).astype(int)
         
         # Quarter end: Last 7 days of months 3, 6, 9, 12
@@ -297,7 +299,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
 
     def get_feature_names(self):
         base_features = ['month', 'day', 'day_of_week', 'is_wednesday', 'is_weekend', 
-                         'is_payday_start', 'is_payday_end', 'is_quarter_end',
+                         'is_payday_peak', 'is_payday_slump', 'is_payday_end', 'is_quarter_end',
                          'days_to_tet', 'event_score', 'cogs_profile']
         
         cat_features = []

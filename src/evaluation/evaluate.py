@@ -13,7 +13,7 @@ from src.training.pipeline import ForecastingPipeline
 from sklearn.metrics import mean_absolute_error
 
 def mean_absolute_percentage_error(y_true, y_pred):
-    mask = y_true > 0
+    mask = y_true > 1e-6
     if not mask.any(): return 0.0
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
@@ -25,7 +25,6 @@ def run_walk_forward_validation():
     raw_sales['Date'] = pd.to_datetime(raw_sales['Date'])
     
     # 2. Define 3-Fold Walk-Forward setup
-    # We use a 12-month test window for each fold to maintain consistency
     folds = [
         {'train_max_year': 2019, 'test_start': 2020, 'test_end': 2020, 'weight': 0.2},
         {'train_max_year': 2020, 'test_start': 2021, 'test_end': 2021, 'weight': 0.3},
@@ -54,6 +53,10 @@ def run_walk_forward_validation():
             print("Warning: Empty test set for this fold. Skipping.")
             continue
             
+        # 3. Naive Baseline (Last Year aligned by Day of Week: 52 weeks = 364 days)
+        test_df['ly_Revenue'] = test_df['Date'].map(raw_sales.set_index(raw_sales['Date'] + pd.Timedelta(days=364))['Revenue']).ffill()
+        test_df['ly_COGS'] = test_df['Date'].map(raw_sales.set_index(raw_sales['Date'] + pd.Timedelta(days=364))['COGS']).ffill()
+        
         # Initialize and Train Pipeline
         pipeline = ForecastingPipeline()
         pipeline.fit(train_df)
@@ -64,23 +67,28 @@ def run_walk_forward_validation():
         test_df['p_Revenue'] = predictions['Revenue'].values
         test_df['p_COGS'] = predictions['COGS'].values
         
-        # Metrics Calculation
+        # Metrics Calculation (Model)
         mae_rev = mean_absolute_error(test_df['Revenue'], test_df['p_Revenue'])
-        mape_rev = mean_absolute_percentage_error(test_df['Revenue'], test_df['p_Revenue'])
-        
         mae_cogs = mean_absolute_error(test_df['COGS'], test_df['p_COGS'])
-        mape_cogs = mean_absolute_percentage_error(test_df['COGS'], test_df['p_COGS'])
         
-        total_mae = mae_rev + mae_cogs
+        # Business Metric: Gross Profit MAE
+        test_df['Profit'] = test_df['Revenue'] - test_df['COGS']
+        test_df['p_Profit'] = test_df['p_Revenue'] - test_df['p_COGS']
+        mae_profit = mean_absolute_error(test_df['Profit'], test_df['p_Profit'])
+        
+        # Baseline Metrics
+        mae_rev_ly = mean_absolute_error(test_df['Revenue'], test_df['ly_Revenue'].fillna(0))
+        
+        lift_over_ly = (1 - mae_rev / mae_rev_ly) * 100 if mae_rev_ly > 0 else 0
         
         metrics = {
             'Fold': fold_num,
             'Test_Period': f"{fold['test_start']}",
             'MAE_Rev': mae_rev,
-            'MAPE_Rev': mape_rev,
             'MAE_COGS': mae_cogs,
-            'MAPE_COGS': mape_cogs,
-            'Total_MAE': total_mae,
+            'MAE_Profit': mae_profit,
+            'MAE_LY_Rev': mae_rev_ly,
+            'Lift_LY_%': lift_over_ly,
             'Weight': fold['weight']
         }
         fold_metrics.append(metrics)
@@ -89,6 +97,7 @@ def run_walk_forward_validation():
         plt.figure(figsize=(15, 6))
         plt.plot(test_df['Date'], test_df['Revenue'], label='Actual Revenue', alpha=0.5)
         plt.plot(test_df['Date'], test_df['p_Revenue'], label='Predicted Revenue', alpha=0.8)
+        plt.plot(test_df['Date'], test_df['ly_Revenue'], label='Naive (Last Year)', linestyle='--', alpha=0.3)
         plt.title(f"Fold {fold_num} Validation ({fold['test_start']}) - Revenue")
         plt.legend()
         plt.grid(True, alpha=0.3)
@@ -96,27 +105,29 @@ def run_walk_forward_validation():
         plt.close()
         
         print(f"Metrics for Fold {fold_num}:")
-        print(f"  Revenue MAE : {mae_rev:,.0f} (MAPE: {mape_rev:.1f}%)")
-        print(f"  COGS MAE    : {mae_cogs:,.0f} (MAPE: {mape_cogs:.1f}%)")
-        print(f"  TOTAL MAE   : {total_mae:,.0f}")
+        print(f"  Revenue MAE   : {mae_rev:,.0f} (LY Baseline: {mae_rev_ly:,.0f} | Lift: {lift_over_ly:.1f}%)")
+        print(f"  Profit MAE    : {mae_profit:,.0f}")
+        print(f"  COGS MAE      : {mae_cogs:,.0f}")
 
     # Summary
     print("\n=== Validation Summary ===")
     df_metrics = pd.DataFrame(fold_metrics)
     
-    # Calculate Weighted MAE
-    weighted_mae = (df_metrics['Total_MAE'] * df_metrics['Weight']).sum()
-    weighted_rev_mae = (df_metrics['MAE_Rev'] * df_metrics['Weight']).sum()
+    # Calculate Weighted Metrics
+    w_rev_mae = (df_metrics['MAE_Rev'] * df_metrics['Weight']).sum()
+    w_profit_mae = (df_metrics['MAE_Profit'] * df_metrics['Weight']).sum()
+    w_lift = (df_metrics['Lift_LY_%'] * df_metrics['Weight']).sum()
     
-    print(df_metrics[['Fold', 'Test_Period', 'MAE_Rev', 'MAE_COGS', 'Total_MAE', 'Weight']].to_string(index=False))
+    print(df_metrics[['Fold', 'Test_Period', 'MAE_Rev', 'MAE_Profit', 'Lift_LY_%', 'Weight']].to_string(index=False))
     
-    print("-" * 40)
-    print(f"Mean Total MAE     : {df_metrics['Total_MAE'].mean():,.0f}")
-    print(f"Weighted Total MAE : {weighted_mae:,.0f} (20/30/50 split)")
-    print(f"Weighted Rev MAE   : {weighted_rev_mae:,.0f}")
-    print("-" * 40)
+    print("-" * 50)
+    print(f"Weighted Rev MAE    : {w_rev_mae:,.0f}")
+    print(f"Weighted Profit MAE : {w_profit_mae:,.0f}")
+    print(f"Weighted Lift vs LY : {w_lift:.2f}%")
+    print("-" * 50)
     print(f"Plots saved to: {plot_dir}")
 
 
 if __name__ == "__main__":
     run_walk_forward_validation()
+

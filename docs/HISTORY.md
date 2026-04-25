@@ -179,6 +179,29 @@ This file tracks the evolution of the project and serves as context for future s
 - **Inventory Signal Caution**: Identified potential data leakage in inventory-based forecasting and reverted to a clean, calendar-driven approach for the submission.
 
 ### Next Steps:
-- Refine **Inertia Scaling** damping factors to further stabilize long-term 2024 projections.
-- Investigate **Category-specific seasonality** refinements to lower MAE toward the 610k target.
 - Perform visual audit of `submission.csv` compared to 2022 actuals.
+
+- **Decision**: Revert to Session 9/10 baseline (706k LB). 
+
+### Session 12: Aggressive Recency & Traffic Momentum (Failed)
+- **Objective**: Use 0.75-year half-life for recency weighting and include traffic sessions in momentum.
+- **Results**: 
+    - Local CV reached **612k** (best so far).
+    - **Leaderboard collapsed**: 730k -> 772k.
+- **Analysis**: Overfitting to the 2021-2022 post-pandemic recovery. The model mistook a temporary bounce for a long-term trend, leading to massive over-prediction in 2023.
+- **Decision**: Full revert. Stop focusing on recency weighting.
+
+### Session 13: CatBoost & Emergency Brake (Failed)
+- **Objective**: Use CatBoost for regime-shift robustness and a 'Minimum-Lift' emergency brake to combat over-prediction.
+- **Results**: 
+    - 2019 Backtest: Captured -19.6% drop (better than LGBM's -16.5%).
+    - **Leaderboard**: 733k (worse than baseline 706k).
+- **Analysis**: Over-conservatism destroyed the seasonality balance. The LightGBM baseline is more robust in its simplicity.
+- **Decision**: Final revert to Session 9 baseline (706k LB). Document as the "Stable King".
+### Session 10: Category Seasonality Experiment (Failed)
+- **Objective**: Integrate category-specific multipliers for events (Tet, Payday, Mega-sale).
+- **Results**: 
+    - Local CV improved by ~2% (Weighted Rev MAE 622k -> 614k).
+    - **Leaderboard worsened**: 706k -> 713k (MAE increased by 7k).
+- **Analysis**: The model over-predicted by ~29M revenue over 18 months. The 10-year median multipliers (e.g., 2.48x for Casual mega-events) were too aggressive for the 2023-2024 economic regime.
+- **Decision**: Revert to 706k baseline. Focus shift to COGS and Recursive Calibration.

@@ -24,7 +24,7 @@ class ForecastingPipeline:
         self.feature_cols = ['Date'] + self.lag_features
         self.model_feature_order = self.lag_features + self.features
         self.categorical_features = ['month', 'day_of_week', 'is_wednesday', 'is_weekend', 
-                                      'is_payday_start', 'is_payday_end', 'is_quarter_end']
+                                      'is_payday_peak', 'is_payday_slump', 'is_payday_end', 'is_quarter_end']
         self.growth_map = None # Monthly YoY growth ratios
         self.inertia_params = {'intercept': 0.0, 'w_rev': 0.0, 'w_order': 1.0, 'w_aov': 0.0}
         self.q4_momentum_map = {}
