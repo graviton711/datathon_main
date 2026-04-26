@@ -209,8 +209,8 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         # 2. Payday & Quarter Signals (Refined based on verified intra-month seasonality)
         # Day 1 is the peak residual payday. Day 4 is the structural slump (stockout/fatigue).
         X['is_payday_peak'] = ((X['day'] >= 1) & (X['day'] <= 2)).astype(int)
-        X['is_payday_slump'] = ((X['day'] >= 4) & (X['day'] <= 5)).astype(int)
-        X['is_payday_end'] = (X['day'] >= 25).astype(int)
+        X['is_payday_slump'] = ((X['day'] >= 3) & (X['day'] <= 6)).astype(int)
+        X['is_payday_end'] = (X['day'] >= 27).astype(int)
         
         # Quarter end: Last 7 days of months 3, 6, 9, 12
         is_q_month = X['month'].isin([3, 6, 9, 12])

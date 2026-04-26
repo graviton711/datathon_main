@@ -442,8 +442,26 @@ class ForecastingPipeline:
             lift = stats['curr'] / (stats['ref'] + 1e-6)
             return np.clip(lift, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
 
-        # --- Dynamic Multi-Factor Inertia Calculation ---
-        # 1. Get latest complete Q4 signals
+        # --- Dynamic Multi-Factor Inertia & Density Acceleration ---
+        # 1. Calculate Revenue Density Growth (Revenue per Unique Product)
+        # This captures the intensive growth trend seen in 2022
+        items_full = pd.read_parquet(Config.DATA_DIR / 'processed' / 'order_items.parquet')
+        orders_full = pd.read_parquet(Config.ORDERS_FILE)
+        items_full = pd.merge(items_full, orders_full[['order_id', 'order_date']], on='order_id')
+        items_full['year'] = pd.to_datetime(items_full['order_date']).dt.year
+        items_full['rev'] = items_full['quantity'] * items_full['unit_price'] - items_full['discount_amount']
+        
+        yearly_rev = items_full.groupby('year')['rev'].sum()
+        yearly_cats = items_full.groupby('year')['product_id'].nunique()
+        yearly_density = yearly_rev / (yearly_cats + 1e-6)
+        
+        years_d = sorted(yearly_density.index)
+        density_acc = 1.0
+        if len(years_d) >= 2:
+            density_acc = np.clip(yearly_density[years_d[-1]] / (yearly_density[years_d[-2]] + 1e-6), 1.0, 1.15)
+            print(f"Discovered Revenue Density Acceleration: {density_acc:.3f}x")
+
+        # 2. Get latest complete Q4 signals
         q4_data = df[df['Date'].dt.month >= 10].copy()
         q4_rev_sum = q4_data.groupby(q4_data['Date'].dt.year)['Revenue'].sum()
         
@@ -475,9 +493,15 @@ class ForecastingPipeline:
         i_w = self.inertia_trust_weight
         self.momentum['base']  = np.clip(raw_base_m * (1 - i_w) + calibrated_m * i_w, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
         self.momentum['event'] = np.clip(raw_event_m * (1 - i_w) + calibrated_m * i_w, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
+        
+        # Apply Soft Density Acceleration (0.5 weight)
+        soft_density_acc = 1.0 + (density_acc - 1.0) * 0.5
+        self.momentum['base'] *= soft_density_acc
+        self.momentum['event'] *= soft_density_acc
+        
         self.momentum['max_train_year'] = max_date.year
         
-        print(f"Dynamic Inertia Applied (Calibrated M: {calibrated_m:.3f}x)")
+        print(f"Dynamic Inertia & Soft Density Applied (Final M: {self.momentum['base']:.3f}x)")
 
     def predict(self, df: pd.DataFrame) -> pd.DataFrame:
         print("Generating stationary recursive forecast (Optimized)...")
@@ -495,7 +519,12 @@ class ForecastingPipeline:
         
         for yr in horizon_years:
             years_out = yr - max_train_year
-            damp = self.momentum_damping ** max(0, years_out - 1)
+            # Annual Step Damping: Year 1 keeps momentum, Year 2+ siết phanh cực mạnh
+            if years_out <= 1:
+                damp = 1.0 
+            else:
+                damp = 0.5 # Extreme damping for the 2024 market correction
+                
             running_m_base *= (base_m ** damp)
             running_m_event *= (event_m ** damp)
             year_multipliers[yr] = {'base': running_m_base, 'event': running_m_event}

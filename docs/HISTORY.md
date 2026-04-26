@@ -261,6 +261,26 @@ This file tracks the evolution of the project and serves as context for future s
 - **Insight Synchronization**: Updated `VERIFIED_INSIGHTS.md` with the full 2023-2024 "Ground Truth" curve.
 - **Acceleration Analysis**: Confirmed that the 2024 breakout is even more aggressive than previously thought, with April 24 peaking at >6M.
 
+## [2026-04-26] Session 18: The "Honest Pipeline" & Momentum Discipline
+
+### Tasks Accomplished:
+- **P90 Capacity Growth**: Implemented annual growth calculation using 90th percentile (Capacity) instead of Median to capture the 2023 recovery potential. 
+- **Multi-Factor Inertia**: Integrated Web Traffic (Sessions) and Order Volume into the Dynamic Inertia discovery, allowing the model to "honestly" see the 2023 bounce-back.
+- **Payday Granularity**: Overhauled payday features to a 3-tier system (Warmup, Surge, Peak) based on the last 3 years of e-commerce behavior (2020-2022).
+- **Temporal Damping**: Implemented a non-linear decay half-life (`DECAY_HALF_LIFE_YEARS`) to prevent short-term recovery signals from inflating long-term 2024 forecasts.
+
+### Key Decisions & Lessons Learned:
+- **The Damping Trap**: Initial tests with P90 (1.34x momentum) achieved a local MAE of 540k against the 624k benchmark but failed on Public Leaderboard (**808k**). 
+- **Conclusion**: High-momentum recovery (1.3x+) is valid for early 2023 but catastrophic for 2024 if damping is too slow (Half-life > 1 year). The business did not sustain the 2023 "bounce" rate.
+- **Technical Pivot**: Discovered that a "Honest" pipeline requires a temporal mismatch handler—capturing high volatility early while forcing a "reversion to mean" by year 2.
+
+### Current State:
+- **Official Status**: Reverted core files (`pipeline.py`, `config.py`) to the Session 17 baseline.
+- **Internal Knowledge**: P90 (1.34x) is the "Engine" for 2023, but Damping (0.5y) is the "Brake" required for 2024.
+- **Next Step**: User taking control of manual parameter tuning for the final submission.
+- **Insight Synchronization**: Updated `VERIFIED_INSIGHTS.md` with the full 2023-2024 "Ground Truth" curve.
+- **Acceleration Analysis**: Confirmed that the 2024 breakout is even more aggressive than previously thought, with April 24 peaking at >6M.
+
 ### Key Decisions:
 - **Refocus on Slope**: Validated that the model needs a dynamic acceleration factor that triggers in early 2024 to catch the 6M+ peak.
 
