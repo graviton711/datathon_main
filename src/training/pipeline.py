@@ -28,6 +28,7 @@ class ForecastingPipeline:
         self.growth_map = None # Monthly YoY growth ratios
         self.inertia_params = {'intercept': 0.0, 'w_rev': 0.0, 'w_order': 1.0, 'w_aov': 0.0}
         self.q4_momentum_map = {}
+        self.category_q4_momentum_map = {}
         self.q4_momentum_default = 0.0
         self.cogs_ratio_clip = (0.0, 2.0)
         
@@ -101,6 +102,42 @@ class ForecastingPipeline:
         momentum_map = {yr: valid.get(yr, default_val) for yr in target_years}
         return momentum_map, default_val
 
+    def _calculate_category_q4_momentum_from_raw(self, df: pd.DataFrame):
+        """Compute category-level Q4 momentum from raw revenue."""
+        try:
+            # Load product info
+            products = pd.read_parquet(Config.PROJECT_ROOT / "data" / "processed" / "products.parquet")[['product_id', 'category']]
+            items = pd.read_parquet(Config.PROJECT_ROOT / "data" / "processed" / "order_items.parquet")[['order_id', 'product_id', 'quantity', 'unit_price', 'discount_amount']]
+            orders = pd.read_parquet(Config.PROJECT_ROOT / "data" / "processed" / "orders.parquet")[['order_id', 'order_date']]
+            
+            items['item_rev'] = items['quantity'] * items['unit_price'] - items['discount_amount']
+            items = pd.merge(items, orders, on='order_id')
+            items = pd.merge(items, products, on='product_id')
+            
+            items['order_date'] = pd.to_datetime(items['order_date'])
+            items['year'] = items['order_date'].dt.year
+            items['month'] = items['order_date'].dt.month
+            
+            q4_cat_totals = items[items['month'] >= 10].groupby(['year', 'category'])['item_rev'].sum().unstack().fillna(0)
+            
+            years = sorted(items['year'].unique())
+            target_years = years + [max(years) + 1]
+            cat_momentum_map = {}
+            
+            for yr in target_years:
+                cat_momentum_map[yr] = {}
+                if (yr - 1) in q4_cat_totals.index and (yr - 2) in q4_cat_totals.index:
+                    for cat in q4_cat_totals.columns:
+                        prev_q4 = q4_cat_totals.loc[yr - 1, cat]
+                        prev2_q4 = q4_cat_totals.loc[yr - 2, cat]
+                        if prev2_q4 > 0:
+                            cat_momentum_map[yr][cat] = (prev_q4 / (prev2_q4 + 1e-6)) - 1.0
+                
+            return cat_momentum_map
+        except Exception as e:
+            print(f"Warning: Category Q4 momentum calculation failed ({e}).")
+            return {}
+
     def _validate_feature_contract(self, X_sample: pd.DataFrame):
         """Ensure train/inference both see the exact same feature schema."""
         transformed_rev = self.revenue_pipeline.named_steps['features'].transform(X_sample.copy())
@@ -120,12 +157,17 @@ class ForecastingPipeline:
 
         # 0. Pre-compute Q4 momentum from raw revenue (before any normalization)
         self.q4_momentum_map, self.q4_momentum_default = self._calculate_q4_momentum_from_raw(df)
+        self.category_q4_momentum_map = self._calculate_category_q4_momentum_from_raw(df)
+        
         self.revenue_pipeline.named_steps['features'].set_q4_momentum_map(
             self.q4_momentum_map, self.q4_momentum_default
         )
+        self.revenue_pipeline.named_steps['features'].set_category_momentum_map(self.category_q4_momentum_map)
+        
         self.cogs_pipeline.named_steps['features'].set_q4_momentum_map(
             self.q4_momentum_map, self.q4_momentum_default
         )
+        self.cogs_pipeline.named_steps['features'].set_category_momentum_map(self.category_q4_momentum_map)
         
         # 0.1. Discover Category-Specific Events & COGS Profiles
         print("Discovering Category-Specific Signals & COGS Profiles...")
@@ -199,6 +241,7 @@ class ForecastingPipeline:
         self.cogs_pipeline.named_steps['features'].category_profile_map = extractor.category_profile_map
         self.cogs_pipeline.named_steps['features'].categories_ = extractor.categories_
         self.cogs_pipeline.named_steps['features'].category_event_map = extractor.category_event_map
+        self.cogs_pipeline.named_steps['features'].category_momentum_map = extractor.category_momentum_map
         self.cogs_pipeline.named_steps['features'].cogs_monthly_profile = extractor.cogs_monthly_profile
         
         print("Training COGS Ratio Model...")
@@ -499,6 +542,38 @@ class ForecastingPipeline:
         self.momentum['base'] *= soft_density_acc
         self.momentum['event'] *= soft_density_acc
         
+        # --- Category-Specific Momentum Discovery ---
+        self.momentum['categories'] = {}
+        try:
+            # 1. Get daily revenue per category
+            products = pd.read_parquet(Config.PROJECT_ROOT / "data" / "processed" / "products.parquet")[['product_id', 'category']]
+            items = pd.read_parquet(Config.PROJECT_ROOT / "data" / "processed" / "order_items.parquet")[['order_id', 'product_id', 'quantity', 'unit_price', 'discount_amount']]
+            items['item_rev'] = items['quantity'] * items['unit_price'] - items['discount_amount']
+            items = pd.merge(items, products, on='product_id')
+            items = pd.merge(items, orders[['order_id', 'order_date']], on='order_id')
+            items['order_date'] = pd.to_datetime(items['order_date'])
+            cat_daily_rev = items.groupby(['order_date', 'category'])['item_rev'].sum().unstack().fillna(0)
+            
+            # 2. Calculate momentum for each category using the same window logic
+            for cat in cat_daily_rev.columns:
+                s = cat_daily_rev[cat]
+                curr_vals = s[(s.index > curr_start) & (s.index <= max_date)]
+                ref_vals = s[(s.index > ref_start) & (s.index <= ref_end)]
+                
+                # Use a simplified Yo Y lift for categories to avoid excessive complexity
+                cat_lift = curr_vals.mean() / (ref_vals.mean() + 1e-6)
+                cat_lift = np.clip(cat_lift, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
+                
+                # Blend with the global calibrated_m for stability (weighted by i_w)
+                self.momentum['categories'][cat] = np.clip(cat_lift * (1 - i_w) + calibrated_m * i_w, Config.MOMENTUM_CLIP_MIN, Config.MOMENTUM_CLIP_MAX)
+                # Apply soft density acceleration to categories too
+                self.momentum['categories'][cat] *= soft_density_acc
+                
+            print(f"Category Momenta: { {k: round(v, 3) for k, v in self.momentum['categories'].items()} }")
+        except Exception as e:
+            print(f"Warning: Category momentum calibration failed ({e}). Falling back to global.")
+            self.momentum['categories'] = {cat: self.momentum['base'] for cat in self.revenue_pipeline.named_steps['features'].categories_}
+
         self.momentum['max_train_year'] = max_date.year
         
         print(f"Dynamic Inertia & Soft Density Applied (Final M: {self.momentum['base']:.3f}x)")
@@ -540,6 +615,21 @@ class ForecastingPipeline:
         # X_horizon will contain all features in the correct order
         X_horizon = self.revenue_pipeline.named_steps['features'].transform(horizon_dummy)
         
+        # Pre-calculate compounded multipliers for each category per year
+        cat_multipliers = {cat: {} for cat in self.momentum['categories']}
+        for cat, mom in self.momentum['categories'].items():
+            running_m = 1.0
+            for yr in horizon_years:
+                years_out = yr - max_train_year
+                # Applying 0.85 damping for Year 1 (2023) to prevent over-shooting
+                # Keeping 0.5 for Year 2+ (2024 correction)
+                if years_out <= 1:
+                    damp = 0.85 
+                else:
+                    damp = 0.5
+                running_m *= (mom ** damp)
+                cat_multipliers[cat][yr] = running_m
+
         # Use lists for faster buffer management (Storing ABSOLUTE values)
         history_rev = list(self.history_abs_rev['Revenue'].values)
         
@@ -549,13 +639,27 @@ class ForecastingPipeline:
         # Cache model references
         rev_model = self.revenue_pipeline.named_steps['model']
         cogs_model = self.cogs_pipeline.named_steps['model']
+        extractor = self.revenue_pipeline.named_steps['features']
         
         # Recursive Loop
         for i in range(len(horizon)):
             curr_year = horizon.iloc[i]['year']
-            is_event = is_event_horizon[i]
-            effective_m = year_multipliers[curr_year]['event' if is_event else 'base']
-            projected_median = self.base_scale_rev * effective_m
+            
+            # Calculate Blended Momentum for this specific day based on category shares
+            blended_m = 0.0
+            for cat in extractor.categories_:
+                share_col = f'share_{cat.lower()}'
+                share_val = X_horizon.iloc[i][share_col]
+                cat_m = cat_multipliers.get(cat, {}).get(curr_year, year_multipliers[curr_year]['base'])
+                blended_m += share_val * cat_m
+            
+            # If event day, apply an additional event lift relative to the blended base
+            if is_event_horizon[i]:
+                # We use the global event/base ratio as a multiplier on the blended base
+                event_lift = (year_multipliers[curr_year]['event'] / (year_multipliers[curr_year]['base'] + 1e-6))
+                projected_median = self.base_scale_rev * blended_m * event_lift
+            else:
+                projected_median = self.base_scale_rev * blended_m
             
             # 1. Update lag features (Normalized on-the-fly to the current projected scale)
             lag_1 = history_rev[-1] / projected_median

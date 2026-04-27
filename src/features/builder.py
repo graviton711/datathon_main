@@ -16,6 +16,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         self.q4_momentum_default = 0.0
         self.event_score_map = {} # (month, day) -> median_lift
         self.category_event_map = {} # category -> {(month, day) -> median_lift}
+        self.category_momentum_map = {} # year -> {category -> momentum}
         self.category_profile_map = {} # month -> {cat: share}
         self.cogs_monthly_profile = {} # month -> median_ratio
         self.categories_ = [] # Dynamic list of categories
@@ -55,6 +56,11 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
     def set_category_event_map(self, category_event_map):
         """Inject category-specific event lift maps."""
         self.category_event_map = category_event_map
+        return self
+
+    def set_category_momentum_map(self, category_momentum_map):
+        """Inject externally computed category-specific momentum maps."""
+        self.category_momentum_map = category_momentum_map
         return self
 
     def fit(self, X, y=None):
@@ -252,6 +258,24 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         unique_years = X['year'].unique()
         year_momentum_map = {y: self._resolve_prev_q4_momentum(y) for y in unique_years}
         X['prev_q4_momentum'] = X['year'].map(year_momentum_map)
+        
+        # 3.5 Category-Specific Blended Momentum
+        # This combines category shares with category momentum to create a more granular signal
+        X['cat_blended_momentum'] = 0.0
+        for y in unique_years:
+            mask = X['year'] == y
+            if mask.any():
+                cat_mom_year = self.category_momentum_map.get(y, {})
+                # If no year-specific map, fallback to resolving year-level default
+                if not cat_mom_year:
+                    X.loc[mask, 'cat_blended_momentum'] = X.loc[mask, 'prev_q4_momentum']
+                else:
+                    blended = pd.Series(0.0, index=X[mask].index)
+                    for cat in self.categories_:
+                        share_col = f'share_{cat.lower()}'
+                        cat_mom = cat_mom_year.get(cat, self.q4_momentum_default)
+                        blended += X.loc[mask, share_col] * cat_mom
+                    X.loc[mask, 'cat_blended_momentum'] = blended
 
         # 4. Peak Momentum Signal (Dynamic)
         # We need a running last peak lift that updates within the dataset
@@ -311,4 +335,4 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         cyclic_features = ['day_sin', 'day_cos', 'month_sin', 'month_cos']
         
         # prev_q4_momentum and peak_momentum are added last
-        return base_features + cat_features + cyclic_features + ['prev_q4_momentum', 'peak_momentum', 'is_odd_year_aug']
+        return base_features + cat_features + cyclic_features + ['prev_q4_momentum', 'cat_blended_momentum', 'peak_momentum', 'is_odd_year_aug']
