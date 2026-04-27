@@ -1,4 +1,5 @@
 import pandas as pd
+pd.set_option('future.no_silent_downcasting', True)
 import numpy as np
 import lightgbm as lgb
 from sklearn.pipeline import Pipeline
@@ -261,7 +262,7 @@ class ForecastingPipeline:
             
             # Calculate Blended Momentum
             blended_m = sum(
-                X_horizon.iloc[i][f'share_{cat.lower()}'] * cat_multipliers[cat].get(curr_year, 1.0)
+                X_horizon.iloc[i].get(f'share_{cat.lower()}', 0.0) * cat_multipliers.get(cat, {}).get(curr_year, 1.0)
                 for cat in extractor.categories_
             )
             

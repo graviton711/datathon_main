@@ -79,3 +79,9 @@ To ensure everyone is running the exact same entry points, use the following com
     2.  A static historical profile derived from 2012-2022 data (e.g., Monthly median fill_rate).
     3.  A recursive value (the model's own past predictions).
 - **Prohibited**: Never attempt to load or merge any data file for dates > 2022-12-31.
+
+## 15. Ethical Best Submission Probing
+- **Signal Discovery Only**: The "Best Reference" submission (e.g., `best_624k.csv`) MUST only be used to identify potential missed signals (e.g., E-commerce events like Double Days).
+- **Anti-Overfitting**: Never tune hyperparameters (Damping, Boost) or hardcode multipliers solely to match the Best Reference's values. All model adjustments must be justified by historical data patterns or statistically significant CV improvements.
+- **Goal**: Maintain model robustness and avoid inheriting noise or specific biases from external submissions.
+
