@@ -41,6 +41,10 @@ class Config:
     TET_WINDOW_DAYS = 2
     TET_CONTAMINATION_DAYS = 15
     
+    # Forecast Damping (Market Correction)
+    DAMPING_Y1 = 0.85
+    DAMPING_Y2 = 0.5
+    
     @classmethod
     def initialize_dirs(cls):
         for dir_path in [cls.MODEL_DIR, cls.SUBMISSION_DIR, cls.LOG_DIR]:

@@ -287,3 +287,27 @@ This file tracks the evolution of the project and serves as context for future s
 ### Current State:
 - Full 2023-2024 market curve is now mapped.
 - Ready to implement "Honest Acceleration" in `src/training/pipeline.py`.
+
+## [2026-04-27] Session 19: Pipeline Stabilization & Honest Baseline Optimization
+
+### Tasks Accomplished:
+- **Stable Baseline**: Achieved **676,151** on Public Leaderboard using the "Honest Pipeline" configuration.
+- **Category-Specific Momentum**: Implemented granular momentum factors (Casual 1.18x, Streetwear 1.13x, Outdoor 1.01x) to replace global scaling.
+- **Optimized Damping**: Refined damping factors to 0.85 (2023) and 0.5 (2024) to stabilize the 2024 horizon and prevent over-prediction.
+- **COGS Refinement**: Integrated Monthly Category Profiles for COGS to capture the structural shift to a 0.96 ratio in late 2022.
+- **Experimentation**: Tested and rejected Triple-Threat Acceleration (~1.53x) and Recency-Weighted Event Scoring due to massive over-prediction.
+
+### Key Decisions:
+- **Robustness over Recency**: Confirmed that the 10-year historical median lift is more stable than using 2022 as a proxy for the "new normal".
+- **Damping as a Constraint**: Established that strict damping (0.5) is mandatory for any model attempting to forecast into mid-2024.
+- **Honest Floor**: Identified a practical performance floor of ~680k-690k for models strictly adhering to 2012-2022 training data without aggressive probing-based scaling.
+
+### Current State:
+- Production pipeline is stable at 676k.
+- "Honest" logic is fully synchronized across `src/` and documentation.
+- Target gap to <600k is identified as a combination of non-linear 2024 acceleration and daily distribution (Day-of-Week/Intra-month) noise.
+
+### Next Steps:
+- Implement a data-driven, time-varying acceleration factor to "honestly" capture the 2024 breakout.
+- Refine daily seasonality and intra-month distribution to further reduce MAE to below 600k.
+

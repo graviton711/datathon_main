@@ -209,4 +209,10 @@ Probing revealed a massive shift in business margins between growth and decline 
 
 ## 7. PROJECT CONCLUSION (April 26, 2026)
 - **Best Calibrated Score**: **624,951**.
-- **The 610k Barrier**: Monthly Mean Calibration has reached its limit. The remaining 15k error is tied to **Daily Distribution (Day-of-Week and Intra-month seasonality)** which cannot be fixed by simple scaling factors.
+- **The <600k Barrier**: Monthly Mean Calibration has reached its limit. The remaining error to reach <600k is tied to **Daily Distribution (Day-of-Week and Intra-month seasonality)** which cannot be fixed by simple scaling factors.
+
+## 8. REFERENCE SUBMISSION FILES
+The following files in `data/best_submit/` serve as the "High-Water Marks" for the project:
+- **`best_624k.csv`**: The 624,951 LB version. This is the gold standard for daily revenue/COGS distribution in 2023-2024.
+- **`best_658k.csv`**: The 658,720 LB version (Probing-based).
+- **`best_750k.csv`**: Initial benchmark (Reference from other teams/history).
