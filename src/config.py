@@ -44,6 +44,14 @@ class Config:
     # Forecast Damping (Market Correction)
     DAMPING_Y1 = 0.85
     DAMPING_Y2 = 0.5
+
+    # Trailing Momentum Floor (prevents seasonal over-suppression in Sep)
+    # Alpha is computed from training data in fit() via MarketAnalyst.calculate_seasonal_floor_alpha()
+    SEP_OCT_FLOOR_MONTHS = [9]
+    SEP_OCT_FLOOR_WINDOW = 60
+
+    # Oct floor (computed separately — lower historical alpha than Sep)
+    OCT_FLOOR_MONTHS = [10]
     
     @classmethod
     def initialize_dirs(cls):

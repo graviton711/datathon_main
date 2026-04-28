@@ -34,6 +34,9 @@ class ForecastingPipeline:
         self.category_q4_momentum_map = {}
         self.q4_momentum_default = 0.0
         self.cogs_ratio_clip = (0.0, 2.0)
+        self.sep_floor_alpha = 0.89  # Default; overwritten by data in fit()
+        self.oct_floor_alpha = 0.81  # Default; overwritten by data in fit()
+        self.lag365_lookup = {}  # Reserved, currently unused
         
         # Scikit-Learn Pipeline for Revenue
         self.revenue_pipeline = Pipeline([
@@ -158,7 +161,10 @@ class ForecastingPipeline:
 
         # 1. Signal Discovery
         self._prepare_signals(df)
-        
+
+        # Store lag365 lookup from training data for use in predict()
+        self.lag365_lookup = df.set_index('Date')['Revenue'].to_dict()
+
         # 2. Training Data Preparation
         df_train = self._prepare_training_data(df)
         
@@ -197,6 +203,12 @@ class ForecastingPipeline:
         self.inertia_params, self.inertia_trust_weight, self.momentum_damping = MarketAnalyst.discover_inertia_params(df)
         self.momentum = MarketAnalyst.calculate_growth_calibration(
             df, extractor.event_score_map, self.inertia_params, self.inertia_trust_weight
+        )
+        self.sep_floor_alpha = MarketAnalyst.calculate_seasonal_floor_alpha(
+            df, Config.SEP_OCT_FLOOR_MONTHS, Config.SEP_OCT_FLOOR_WINDOW
+        )
+        self.oct_floor_alpha = MarketAnalyst.calculate_seasonal_floor_alpha(
+            df, Config.OCT_FLOOR_MONTHS, Config.SEP_OCT_FLOOR_WINDOW
         )
         print(f"Fit Complete. Base Momentum: {self.momentum['base']:.3f}x")
         
@@ -253,12 +265,14 @@ class ForecastingPipeline:
         # 3. Recursive Loop
         history_rev = list(self.history_abs_rev['Revenue'].values)
         preds_rev, preds_cogs = [], []
-        
+
         rev_model = self.revenue_pipeline.named_steps['model']
         cogs_model = self.cogs_pipeline.named_steps['model']
         
         for i in range(len(horizon)):
-            curr_year = horizon.iloc[i]['year']
+            curr_year  = horizon.iloc[i]['year']
+            curr_month = horizon.iloc[i]['Date'].month
+            curr_date  = horizon.iloc[i]['Date']
             
             # Calculate Blended Momentum
             blended_m = sum(
@@ -284,9 +298,21 @@ class ForecastingPipeline:
             raw_ratio = float(np.clip(cogs_model.predict(current_X)[0], self.cogs_ratio_clip[0], self.cogs_ratio_clip[1]))
             
             final_rev = max(0, raw_norm_rev * projected_median)
+
+            # Trailing Momentum Floor: prevent seasonal over-suppression in H2 low months
+            if curr_month in Config.SEP_OCT_FLOOR_MONTHS and len(history_rev) >= 30:
+                window = history_rev[-Config.SEP_OCT_FLOOR_WINDOW:]
+                trailing_mean = float(np.mean(window))
+                final_rev = max(final_rev, self.sep_floor_alpha * trailing_mean)
+
+            if curr_month in Config.OCT_FLOOR_MONTHS and len(history_rev) >= 30:
+                window = history_rev[-Config.SEP_OCT_FLOOR_WINDOW:]
+                trailing_mean = float(np.mean(window))
+                final_rev = max(final_rev, self.oct_floor_alpha * trailing_mean)
+
             preds_rev.append(final_rev)
             preds_cogs.append(max(0, final_rev * raw_ratio))
-            
+
             history_rev.append(final_rev)
             
         return pd.DataFrame({
