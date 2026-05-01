@@ -35,11 +35,10 @@ Thumbs.db
 .env
 
 # Internal docs (uncomment if you want to keep them private)
-# docs/ 
+docs/ 
 
 # Reports (Ensure PDF is committed)
 !reports/*.pdf
-!docs/
 
 # Scratch / experiment files
 scratch/
