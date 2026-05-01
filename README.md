@@ -2,7 +2,6 @@
 **VinUniversity | THE GRIDBREAKER: Breaking Business Boundaries**
 
 > Dự báo doanh thu thương mại điện tử (01/01/2023 – 01/07/2024) cho doanh nghiệp thời trang Việt Nam.  
-> Public Leaderboard MAE: **647,202** (cải thiện 24% so với Last Year Naive Baseline)
 
 ---
 
