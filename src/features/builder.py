@@ -23,12 +23,7 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         self.categories_ = [] 
         self.latest_peak_lift = 1.0 
         
-        # Lunar New Year lookup
-        self.tet_dates = {k: pd.to_datetime(v) for k, v in {
-            2012: '2012-01-23', 2013: '2013-02-10', 2014: '2014-01-31', 2015: '2015-02-19',
-            2016: '2016-02-08', 2017: '2017-01-28', 2018: '2018-02-16', 2019: '2019-02-05',
-            2020: '2020-01-25', 2021: '2021-02-12', 2022: '2022-02-01', 2023: '2023-01-22', 2024: '2024-02-10'
-        }.items()}
+        self.tet_dates = {}  # populated in fit() from data via MarketAnalyst._infer_tet_dates
 
     def set_q4_momentum_map(self, q4_momentum_dict, default_value=None):
         self.q4_momentum_dict = {int(k): float(v) for k, v in q4_momentum_dict.items()} if q4_momentum_dict else {}
@@ -53,8 +48,12 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
             df[self.rev_col] = y
             df[self.date_col] = pd.to_datetime(df[self.date_col])
             self.start_date_ref = df[self.date_col].min()
-            
-            # Discovery delegated to MarketAnalyst
+
+            max_train_year = df[self.date_col].dt.year.max()
+            train_years = df[self.date_col].dt.year.unique().tolist()
+            extra_years = list(range(max_train_year + 1, max_train_year + 3))
+            self.tet_dates = MarketAnalyst._infer_tet_dates(train_years + extra_years)
+
             if not self.event_score_map:
                 self.event_score_map = MarketAnalyst.discover_global_events(df)
             if not self.category_profile_map:
@@ -174,3 +173,8 @@ class BaselineFeatureExtractor(BaseEstimator, TransformerMixin):
         cats = [f'{p}_{c.lower()}' for c in self.categories_ for p in ['share', 'event_score', 'inter']]
         cyclic = ['day_sin', 'day_cos', 'month_sin', 'month_cos']
         return base + cats + cyclic + ['prev_q4_momentum', 'cat_blended_momentum', 'peak_momentum', 'is_odd_year_aug', 'is_double_day']
+
+    def get_feature_names_out(self, input_features=None):
+        """Standard scikit-learn 1.0+ API for feature names."""
+        lag_cols = ['rev_lag_1', 'rev_lag_7', 'rev_roll_7']
+        return np.array(lag_cols + self.get_feature_names())

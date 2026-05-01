@@ -1,5 +1,4 @@
 # Time Series Constants
-REGIME_BREAK_2019 = "2019-01-01"
 
 # Feature Groups
 TEMPORAL_FEATURES = [

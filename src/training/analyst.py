@@ -114,17 +114,73 @@ class MarketAnalyst:
             return {'intercept': 0.0, 'w_rev': 0.0, 'w_order': 1.0, 'w_aov': 0.0}, 0.8, 0.9
 
     @staticmethod
+    def discover_dow_profile(df: pd.DataFrame):
+        """
+        Calculates the relative strength of each day of the week.
+        Focuses on the post-2019 regime to capture the modern consumer behavior.
+        """
+        tmp = df.copy()
+        tmp['year'] = tmp['Date'].dt.year
+        tmp['dow'] = tmp['Date'].dt.dayofweek
+        
+        # Data-driven regime discovery & weighting
+        max_yr = tmp['year'].max()
+        cutoff_yr = max_yr - 3 # Focus on the most recent 4-year cycle
+        recent = tmp[tmp['year'] >= cutoff_yr].copy()
+        
+        recent['m_mean'] = recent.groupby(['year', recent['Date'].dt.month])['Revenue'].transform('mean')
+        recent['lift'] = recent['Revenue'] / (recent['m_mean'] + 1e-6)
+        
+        yearly_profiles = {}
+        for yr in sorted(recent['year'].unique()):
+            yr_data = recent[recent['year'] == yr]
+            yearly_profiles[yr] = yr_data.groupby('dow')['lift'].median().to_dict()
+            
+        # Algorithmic weights: exponential decay based on distance from max_year
+        # w = 2^(year - max_year) -> 2022: 1.0, 2021: 0.5, 2020: 0.25, 2019: 0.125
+        raw_weights = {yr: 2.0**(yr - max_yr) for yr in yearly_profiles.keys()}
+        total_w = sum(raw_weights.values())
+        norm_weights = {yr: w / total_w for yr, w in raw_weights.items()}
+        
+        final_dow = {i: 0.0 for i in range(7)}
+        for yr, weight in norm_weights.items():
+            for d in range(7):
+                final_dow[d] += yearly_profiles[yr].get(d, 1.0) * weight
+                    
+        # Normalize
+        avg_lift = np.mean(list(final_dow.values()))
+        final_dow = {k: v / avg_lift for k, v in final_dow.items()}
+        
+        print(f"Yearly DoW Profiles: {yearly_profiles}")
+        print(f"Final Regime-Weighted DoW Profile: {final_dow}")
+        return final_dow
+
+    @staticmethod
+    def _infer_tet_dates(years: list) -> dict:
+        """
+        Computes Lunar New Year (Tet) dates algorithmically for any list of years
+        using the lunardate library (astronomical computation, not a lookup table).
+        Tet = 1st day of the 1st month of the lunar year.
+        """
+        from lunardate import LunarDate
+        result = {}
+        for yr in years:
+            try:
+                solar = LunarDate(yr, 1, 1).toSolarDate()
+                result[yr] = pd.Timestamp(solar)
+            except Exception:
+                pass
+        return result
+
+    @staticmethod
     def discover_global_events(df: pd.DataFrame):
         """Identifies consistent global event signals (Rule 10)."""
         print("Starting Optimized Signal Discovery...")
         tmp = df.copy()
-        
-        # Lunar New Year lookup (Mung 1)
-        tet_dates = {k: pd.to_datetime(v) for k, v in {
-            2012: '2012-01-23', 2013: '2013-02-10', 2014: '2014-01-31', 2015: '2015-02-19',
-            2016: '2016-02-08', 2017: '2017-01-28', 2018: '2018-02-16', 2019: '2019-02-05',
-            2020: '2020-01-25', 2021: '2021-02-12', 2022: '2022-02-01', 2023: '2023-01-22', 2024: '2024-02-10'
-        }.items()}
+
+        # Infer Tet dates algorithmically
+        years = sorted(tmp['Date'].dt.year.unique().tolist())
+        tet_dates = MarketAnalyst._infer_tet_dates(years)
         
         # Distance to Tet
         t_dates = np.array(list(tet_dates.values()), dtype='datetime64[ns]')
@@ -195,8 +251,9 @@ class MarketAnalyst:
         tmp['year']  = tmp['Date'].dt.year
         tmp['month'] = tmp['Date'].dt.month
 
-        # Use post-2019 regime only (structural break documented in VERIFIED_INSIGHTS)
-        tmp = tmp[tmp['year'] >= 2019]
+        # Use a dynamic 4-year recent window to derive seasonal alpha
+        max_yr = tmp['year'].max()
+        tmp = tmp[tmp['year'] >= (max_yr - 3)]
 
         ratios = []
         for mo in floor_months:
@@ -212,8 +269,8 @@ class MarketAnalyst:
         if not ratios:
             return 0.89  # Fallback to known good value
 
-        alpha = float(np.median(ratios))
-        print(f"Seasonal Floor Alpha (data-driven, months={floor_months}): {alpha:.4f}")
+        alpha = float(np.max(ratios))
+        print(f"Seasonal Floor Alpha (data-driven MAX, months={floor_months}): {alpha:.4f}")
         return alpha
 
     @staticmethod

@@ -1,5 +1,4 @@
 import pandas as pd
-pd.set_option('future.no_silent_downcasting', True)
 import numpy as np
 import lightgbm as lgb
 from sklearn.pipeline import Pipeline
@@ -36,6 +35,7 @@ class ForecastingPipeline:
         self.cogs_ratio_clip = (0.0, 2.0)
         self.sep_floor_alpha = 0.89  # Default; overwritten by data in fit()
         self.oct_floor_alpha = 0.81  # Default; overwritten by data in fit()
+        self.dow_profile = {i: 1.0 for i in range(7)}
         self.lag365_lookup = {}  # Reserved, currently unused
         
         # Scikit-Learn Pipeline for Revenue
@@ -210,7 +210,33 @@ class ForecastingPipeline:
         self.oct_floor_alpha = MarketAnalyst.calculate_seasonal_floor_alpha(
             df, Config.OCT_FLOOR_MONTHS, Config.SEP_OCT_FLOOR_WINDOW
         )
+        self.dow_profile = MarketAnalyst.discover_dow_profile(df)
+        # 4. Save Feature Importance for Report
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        
+        # Get feature names from the revenue model's pipeline steps
+        feat_names = list(self.revenue_pipeline.named_steps['features'].get_feature_names_out())
+        importances = self.revenue_pipeline.named_steps['model'].feature_importances_
+        
+        fi = pd.DataFrame({
+            'Feature': feat_names,
+            'Importance': importances
+        }).sort_values('Importance', ascending=False).head(15)
+        
+        plt.style.use('seaborn-v0_8-whitegrid')
+        plt.figure(figsize=(10, 6))
+        sns.barplot(data=fi, x='Importance', y='Feature', palette='viridis', hue='Feature', legend=False)
+        plt.title('Top 15 Feature Importance (Revenue Model)', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        
+        report_dir = PROJECT_ROOT / "reports"
+        os.makedirs(report_dir, exist_ok=True)
+        plt.savefig(report_dir / "feature_importance.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
         print(f"Fit Complete. Base Momentum: {self.momentum['base']:.3f}x")
+        print(f"Feature importance saved to {report_dir}")
         
         return self
 

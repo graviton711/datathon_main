@@ -1,66 +1,132 @@
-# THE GRIDBREAKER: Diagnosing Structural Shifts and Scaling Recursive Forecasts in E-Commerce
+# Datathon 2026 — Deus x Machina
+**VinUniversity | THE GRIDBREAKER: Breaking Business Boundaries**
 
-**DATATHON 2026 - ROUND 1**  
-**Team: Deus x Machina**  
-**Members:** Phan Dang Thai Son (Lead), Hoang Chi Tam  
-**Organization:** VinUniversity, Hanoi, Vietnam
+> Dự báo doanh thu thương mại điện tử (01/01/2023 – 01/07/2024) cho doanh nghiệp thời trang Việt Nam.  
+> Public Leaderboard MAE: **647,202** (cải thiện 24% so với Last Year Naive Baseline)
 
 ---
 
-## 1. Giới thiệu
-Dự án này tập trung vào việc chẩn đoán nguyên nhân sự sụt giảm doanh số đột ngột vào năm 2019 và xây dựng mô hình dự báo doanh thu (Revenue) và giá vốn hàng bán (COGS) cho giai đoạn 2023-2024.
+## Thành viên nhóm
 
-Chúng tôi xác định đây là một cuộc khủng hoảng niềm tin từ khách hàng (Sizing Crisis) và giải quyết bài toán dự báo bằng phương pháp **Recursive LightGBM** kết hợp với **Stationary Normalization** và **Dynamic Momentum Calibration**.
+| Tên | Email |
+|-----|-------|
+| Deus x Machina | dungroi19@gmail.com |
 
-## 2. Cấu trúc thư mục
-Dự án được tổ chức theo tiêu chuẩn modular để đảm bảo tính tái lập và dễ dàng mở rộng:
+---
 
-```text
-├── data/               # Dữ liệu thô và dữ liệu đã qua xử lý (parquet)
-├── docs/               # Tài liệu hướng dẫn, quy tắc và nhật ký dự án
-├── models/             # Lưu trữ các tệp mô hình đã huấn luyện (.joblib)
-├── notebooks/          # Jupyter Notebooks phục vụ phân tích EDA
-├── report/             # Báo cáo kỹ thuật (LaTeX NeurIPS template)
-├── src/                # Mã nguồn chính
-│   ├── features/       # Logic trích xuất đặc trưng (Stationary Features)
-│   ├── training/       # Pipeline huấn luyện và hiệu chuẩn thị trường
-│   ├── evaluation/     # Công cụ đánh giá Walk-Forward Cross-Validation
-│   └── utils/          # Các hàm tiện ích bổ trợ
-├── submissions/        # Tệp kết quả cuối cùng nộp lên Kaggle
-└── requirements.txt    # Danh sách thư viện cần thiết
+## Cấu trúc thư mục
+
+```
+├── data/
+│   ├── raw/                  # Dữ liệu gốc từ ban tổ chức (15 file CSV)
+│   └── processed/            # Dữ liệu Parquet sau tiền xử lý (Generated)
+├── docs/                     # Quy chế và nhật ký dự án
+├── notebooks/                # Notebook EDA và phân tích
+├── reports/
+│   ├── main.pdf              # Báo cáo chính thức
+│   └── main.tex              # Source LaTeX
+├── src/
+│   ├── config.py
+│   ├── constants.py
+│   ├── utils/
+│   │   └── prepare_data.py   # Script xử lý dữ liệu từ raw
+│   ├── features/
+│   │   └── builder.py
+│   ├── training/
+│   │   ├── pipeline.py
+│   │   ├── analyst.py
+│   │   └── weighting.py
+│   └── evaluation/
+│       └── evaluate.py
+├── submissions/
+└── requirements.txt
 ```
 
-## 3. Cài đặt và Sử dụng
+---
 
-### Cài đặt môi trường
-Yêu cầu Python 3.9+. Khuyến khích sử dụng Virtual Environment:
+## Yêu cầu môi trường
+
+- Python 3.12+
+- Các thư viện chính: `lightgbm`, `pandas`, `numpy`, `scikit-learn`, `lunardate`
+
+Cài đặt:
+
 ```bash
-python -m venv venv
-source venv/bin/activate  # Trên Windows: venv\Scripts\activate
+# 1. Clone repository
+git clone https://github.com/graviton711/datathon_main.git
+cd datathon_main
+
+# 2. Cài đặt dependencies
 pip install -r requirements.txt
 ```
 
-### Chạy quy trình huấn luyện và dự báo
-Để tạo tệp nộp bài (`submissions/submission.csv`) bằng Pipeline ổn định nhất:
-```bash
-python -m src.training.pipeline
+---
+
+## Hướng dẫn tái lập kết quả
+
+### Bước 1 — Chuẩn bị dữ liệu
+
+1. Đặt toàn bộ 15 file CSV từ ban tổ chức vào thư mục `data/raw/`:
+
+```
+data/raw/
+├── products.csv
+├── customers.csv
+├── promotions.csv
+├── geography.csv
+├── orders.csv
+├── order_items.csv
+├── payments.csv
+├── shipments.csv
+├── returns.csv
+├── reviews.csv
+├── sales.csv
+├── sample_submission.csv
+├── inventory.csv
+├── inventory_enhanced.csv
+└── web_traffic.csv
 ```
 
-### Đánh giá mô hình (Backtesting)
-Để chạy kiểm chứng chéo (3-Fold Walk-Forward CV) trên dữ liệu lịch sử:
+### Bước 2 — Tái lập toàn bộ kết quả
+
+Sau khi đã có đủ 15 file CSV trong `data/raw/`, bạn chỉ cần chạy lệnh sau để thực hiện toàn bộ quy trình (Tiền xử lý -> Đánh giá CV -> Tạo Submission):
+
 ```bash
-python src/evaluation/evaluate.py
+python reproduce.py
 ```
 
-## 4. Phương pháp tiếp cận chính
-- **Target Engineering**: Chuyển đổi Revenue sang tỷ lệ chuẩn hóa (Revenue/Annual Median) để loại bỏ nhiễu từ sự thay đổi quy mô doanh nghiệp qua các thời kỳ.
-- **Dynamic Momentum**: Tự động tính toán hệ số tăng trưởng YoY dựa trên tín hiệu Q4 và quán tính thị trường (Inertia).
-- **Seasonal Floors**: Áp dụng các ngưỡng chặn dưới cho doanh số tháng 9-10 dựa trên dữ liệu lịch sử để tránh dự báo quá thấp do biến động mùa vụ.
-- **Rule 14 Compliance**: Đảm bảo tính minh bạch, tuyệt đối không rò rỉ dữ liệu tương lai vào mô hình huấn luyện.
-
-## 5. Kết quả đạt được
-- **Best Leaderboard Score**: **650,000 MAE** (Honest Pipeline).
-- **Báo cáo chi tiết**: Xem tại [report/main.pdf](report/main.pdf) để hiểu sâu hơn về phân tích chẩn đoán sự sụp đổ năm 2019 và giải pháp hồi phục.
+**Kết quả đầu ra:**
+- **Logs:** Kết quả MAE trên các fold validation (2020-2022).
+- **Submission:** `submissions/submission.csv` sẵn sàng nộp lên Kaggle.
 
 ---
-© 2026 Deus x Machina - VinUniversity.
+
+## Tổng quan phương pháp
+
+### Phân tích dữ liệu (EDA)
+
+Bộ dữ liệu có một biến cố nổi bật: volume đơn hàng giảm ~70% vào năm 2019. Phân tích cho thấy đây là hệ quả của "Trust Collapse" — fill rate giữ ~100% nhưng Conversion Rate rơi từ 1.5% xuống 0.3%, và Year-2 retention từ 65% (2012) xuống còn 8% (2019). Nguyên nhân gốc rễ: 52.6% lý do trả hàng là `wrong_size` hoặc `not_as_described`.
+
+### Mô hình dự báo
+
+Pipeline sử dụng **Recursive LightGBM** kết hợp **Stationary Normalization**:
+
+- **Stationary Normalization**: Chuẩn hoá target theo median năm `r̃_t = Revenue_t / μ̂_year` để xử lý đứt gãy cấu trúc 2019 (µ_2012–2018 ≈ 3.3× µ_2019+).
+- **Regime Weighting**: Ưu tiên dữ liệu từ 2019 trở đi phản ánh chế độ thị trường hiện tại.
+- **Blended Category Momentum**: Tính hệ số tăng trưởng theo cơ cấu danh mục sản phẩm.
+- **Damped Multiplier**: Giảm chấn hệ số tăng trưởng theo độ sâu horizon để ngăn diverge qua 548 ngày.
+
+| Cấu hình | MAE |
+|----------|-----|
+| Last Year Naive (baseline) | 859,676 |
+| + LightGBM | 727,335 |
+| + Stationary Norm | 684,330 |
+| + Regime Weighting (LB) | **647,202** |
+
+MAE 647,202 tương đương **14.7% MAPE** (baseline: 19.5%, cải thiện 4.8 pp).
+
+---
+
+## Kaggle
+
+Submission: [https://drive.google.com/file/d/1UcSKK5Ngep4KYM2sKhKPqRbeht0r3y1u/view?usp=sharing](https://drive.google.com/file/d/1UcSKK5Ngep4KYM2sKhKPqRbeht0r3y1u/view?usp=sharing)

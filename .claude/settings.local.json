@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(e:/VSCODE_WORKSPACE/NewDatathon/venv/Scripts/python.exe -m pip show jupyter nbconvert)",
-      "Bash(e:/VSCODE_WORKSPACE/NewDatathon/venv/Scripts/python.exe *)"
-    ]
-  }
-}

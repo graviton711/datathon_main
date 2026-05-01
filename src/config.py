@@ -24,7 +24,7 @@ class Config:
     # Target and Features
     DATE_COL = "Date"
     
-    # Forecasting Pipeline Hyperparameters
+    # Data Weighting
     DECAY_HALF_LIFE_YEARS = 1.5
     REC_HISTORY_WINDOW = 60
     REC_LAG_WINDOW = 30
@@ -43,7 +43,7 @@ class Config:
     
     # Forecast Damping (Market Correction)
     DAMPING_Y1 = 0.85
-    DAMPING_Y2 = 0.5
+    DAMPING_Y2 = 0.3
 
     # Trailing Momentum Floor (prevents seasonal over-suppression in Sep)
     # Alpha is computed from training data in fit() via MarketAnalyst.calculate_seasonal_floor_alpha()

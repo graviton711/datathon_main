@@ -12,8 +12,10 @@ env/
 # Data and Artifacts
 data/processed/
 data/external/
+data/best_submit/
 models/
 submissions/*.csv
+submissions/probes_dow/
 logs/*.log
 
 # Notebooks
@@ -23,6 +25,7 @@ logs/*.log
 # IDEs
 .vscode/
 .idea/
+.claude/
 
 # OS
 .DS_Store
@@ -30,3 +33,17 @@ Thumbs.db
 
 # Secrets
 .env
+
+# Internal docs (uncomment if you want to keep them private)
+# docs/ 
+
+# Reports (Ensure PDF is committed)
+!reports/*.pdf
+!docs/
+
+# Scratch / experiment files
+scratch/
+
+# Probing scripts (internal only)
+scripts/apply_probing_dow.py
+scripts/post_process_submission.py

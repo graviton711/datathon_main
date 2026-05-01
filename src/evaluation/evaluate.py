@@ -93,15 +93,24 @@ def run_walk_forward_validation():
         }
         fold_metrics.append(metrics)
         
-        # Visualization
-        plt.figure(figsize=(15, 6))
-        plt.plot(test_df['Date'], test_df['Revenue'], label='Actual Revenue', alpha=0.5)
-        plt.plot(test_df['Date'], test_df['p_Revenue'], label='Predicted Revenue', alpha=0.8)
-        plt.plot(test_df['Date'], test_df['ly_Revenue'], label='Naive (Last Year)', linestyle='--', alpha=0.3)
-        plt.title(f"Fold {fold_num} Validation ({fold['test_start']}) - Revenue")
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.savefig(plot_dir / f"val_fold_{fold_num}.png")
+        # Visualization (Optimized for Print/Report)
+        plt.style.use('seaborn-v0_8-whitegrid')
+        plt.figure(figsize=(12, 5))
+        plt.plot(test_df['Date'], test_df['Revenue'], label='Actual Revenue', alpha=0.5, color='gray', linewidth=1)
+        plt.plot(test_df['Date'], test_df['p_Revenue'], label='Predicted Revenue', alpha=0.9, color='#1f77b4', linewidth=1.5)
+        plt.plot(test_df['Date'], test_df['ly_Revenue'], label='Naive Baseline', linestyle=':', alpha=0.6, color='red')
+        
+        plt.title(f"Fold {fold_num} Validation ({fold['test_start']})", fontsize=14, fontweight='bold')
+        plt.xlabel("Date", fontsize=12)
+        plt.ylabel("Revenue (VND)", fontsize=12)
+        plt.legend(fontsize=10, loc='upper right', frameon=True)
+        plt.xticks(fontsize=10)
+        plt.yticks(fontsize=10)
+        
+        plt.tight_layout()
+        # Save to both data/plots and reports/ for LaTeX
+        plt.savefig(plot_dir / f"val_fold_{fold_num}.png", dpi=300, bbox_inches='tight')
+        plt.savefig(PROJECT_ROOT / "reports" / f"val_fold_{fold_num}.png", dpi=300, bbox_inches='tight')
         plt.close()
         
         print(f"Metrics for Fold {fold_num}:")
