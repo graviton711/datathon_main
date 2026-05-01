@@ -54,6 +54,7 @@ Cài đặt:
 # 1. Clone repository
 git clone https://github.com/graviton711/datathon_main.git
 cd datathon_main
+```
 
 # 2. Tạo và kích hoạt Virtual Environment
 
@@ -79,7 +80,6 @@ python3 -m venv .venv
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
-```
 ```
 
 ---
