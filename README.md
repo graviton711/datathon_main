@@ -60,9 +60,13 @@ cd datathon_main
 python -m venv .venv
 .venv\Scripts\activate
 
-# Linux / macOS:
+# Linux / macOS (Bash):
 python3 -m venv .venv
 source .venv/bin/activate
+
+# Linux (PowerShell):
+python3 -m venv .venv
+. .venv/bin/Activate.ps1
 
 # 3. Cài đặt dependencies
 pip install --upgrade pip
