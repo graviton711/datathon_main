@@ -19,7 +19,6 @@
 ├── data/
 │   ├── raw/                  # Dữ liệu gốc từ ban tổ chức (14 file CSV)
 │   └── processed/            # Dữ liệu Parquet sau tiền xử lý (Generated)
-├── docs/                     # Quy chế và nhật ký dự án
 ├── notebooks/                # Notebook EDA và phân tích
 ├── reports/
 │   ├── main.pdf              # Báo cáo chính thức
