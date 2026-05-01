@@ -55,7 +55,17 @@ Cài đặt:
 git clone https://github.com/graviton711/datathon_main.git
 cd datathon_main
 
-# 2. Cài đặt dependencies
+# 2. Tạo và kích hoạt Virtual Environment
+# Windows:
+python -m venv .venv
+.venv\Scripts\activate
+
+# Linux / macOS:
+python3 -m venv .venv
+source .venv/bin/activate
+
+# 3. Cài đặt dependencies
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
