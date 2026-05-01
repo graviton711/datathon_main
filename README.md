@@ -18,7 +18,7 @@
 
 ```
 ├── data/
-│   ├── raw/                  # Dữ liệu gốc từ ban tổ chức (15 file CSV)
+│   ├── raw/                  # Dữ liệu gốc từ ban tổ chức (14 file CSV)
 │   └── processed/            # Dữ liệu Parquet sau tiền xử lý (Generated)
 ├── docs/                     # Quy chế và nhật ký dự án
 ├── notebooks/                # Notebook EDA và phân tích
@@ -66,7 +66,7 @@ pip install -r requirements.txt
 
 ### Bước 1 — Chuẩn bị dữ liệu
 
-1. Đặt toàn bộ 15 file CSV từ ban tổ chức vào thư mục `data/raw/`:
+1. Đặt toàn bộ 14 file CSV từ ban tổ chức vào thư mục `data/raw/`:
 
 ```
 data/raw/
@@ -83,13 +83,12 @@ data/raw/
 ├── sales.csv
 ├── sample_submission.csv
 ├── inventory.csv
-├── inventory_enhanced.csv
 └── web_traffic.csv
 ```
 
 ### Bước 2 — Tái lập toàn bộ kết quả
 
-Sau khi đã có đủ 15 file CSV trong `data/raw/`, bạn chỉ cần chạy lệnh sau để thực hiện toàn bộ quy trình (Tiền xử lý -> Đánh giá CV -> Tạo Submission):
+Sau khi đã có đủ 14 file CSV trong `data/raw/`, bạn chỉ cần chạy lệnh sau để thực hiện toàn bộ quy trình (Tiền xử lý -> Đánh giá CV -> Tạo Submission):
 
 ```bash
 python reproduce.py
@@ -105,13 +104,13 @@ python reproduce.py
 
 ### Phân tích dữ liệu (EDA)
 
-Bộ dữ liệu có một biến cố nổi bật: volume đơn hàng giảm ~70% vào năm 2019. Phân tích cho thấy đây là hệ quả của "Trust Collapse" — fill rate giữ ~100% nhưng Conversion Rate rơi từ 1.5% xuống 0.3%, và Year-2 retention từ 65% (2012) xuống còn 8% (2019). Nguyên nhân gốc rễ: 52.6% lý do trả hàng là `wrong_size` hoặc `not_as_described`.
+Bộ dữ liệu có một biến cố nổi bật: volume đơn hàng giảm ~40% vào năm 2019. Phân tích cho thấy đây là hệ quả của "Trust Collapse" — fill rate giữ ~100% nhưng Conversion Rate rơi từ 1.5% xuống 0.3%, và Year-2 retention từ 65% (2012) xuống còn 8% (2019). Nguyên nhân gốc rễ: 52.6% lý do trả hàng là `wrong_size` hoặc `not_as_described`.
 
 ### Mô hình dự báo
 
 Pipeline sử dụng **Recursive LightGBM** kết hợp **Stationary Normalization**:
 
-- **Stationary Normalization**: Chuẩn hoá target theo median năm `r̃_t = Revenue_t / μ̂_year` để xử lý đứt gãy cấu trúc 2019 (µ_2012–2018 ≈ 3.3× µ_2019+).
+- **Stationary Normalization**: Chuẩn hoá target theo median năm `r̃_t = Revenue_t / μ̂_year` để xử lý đứt gãy cấu trúc 2019 (μ_2012–2018 ≈ 1.6× μ_2019+).
 - **Regime Weighting**: Ưu tiên dữ liệu từ 2019 trở đi phản ánh chế độ thị trường hiện tại.
 - **Blended Category Momentum**: Tính hệ số tăng trưởng theo cơ cấu danh mục sản phẩm.
 - **Damped Multiplier**: Giảm chấn hệ số tăng trưởng theo độ sâu horizon để ngăn diverge qua 548 ngày.
