@@ -352,6 +352,7 @@ class ForecastingPipeline:
 
 def run_baseline():
     print("--- Starting Baseline Pipeline ---")
+    Config.initialize_dirs()
     
     # 1. Load Data
     sales = pd.read_parquet(Config.SALES_TRAIN_FILE)

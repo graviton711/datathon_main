@@ -19,6 +19,7 @@ def mean_absolute_percentage_error(y_true, y_pred):
 
 def run_walk_forward_validation():
     print("=== Walk-Forward 3-Fold Validation ===")
+    Config.initialize_dirs()
     
     # 1. Load Data
     raw_sales = pd.read_parquet(Config.SALES_TRAIN_FILE)
