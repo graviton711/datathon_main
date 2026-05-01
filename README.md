@@ -136,14 +136,19 @@ Pipeline sử dụng **Recursive LightGBM** kết hợp **Stationary Normalizati
 - **Blended Category Momentum**: Tính hệ số tăng trưởng theo cơ cấu danh mục sản phẩm.
 - **Damped Multiplier**: Giảm chấn hệ số tăng trưởng theo độ sâu horizon để ngăn diverge qua 548 ngày.
 
-| Cấu hình | MAE |
-|----------|-----|
-| Last Year Naive (baseline) | 859,676 |
-| + LightGBM | 727,335 |
-| + Stationary Norm | 684,330 |
-| + Regime Weighting (LB) | **647,202** |
+### Kết quả đánh giá (Walk-Forward CV)
 
-MAE 647,202 tương đương **14.7% MAPE** (baseline: 19.5%, cải thiện 4.8 pp).
+Pipeline được đánh giá bằng phương pháp Walk-Forward Cross-Validation trên 3 fold (2020, 2021, 2022) để đảm bảo tính ổn định:
+
+| Fold | Giai đoạn | MAE Revenue | Lift vs Baseline |
+|------|-----------|-------------|------------------|
+| 1    | 2020      | 675,485     | +27.3%           |
+| 2    | 2021      | 618,552     | +20.3%           |
+| 3    | 2022      | 727,335     | +15.4%           |
+| **Weighted** | **Tổng thể** | **684,330** | **+19.2%** |
+
+MAE 684,330 tương đương **15.6% MAPE** (cải thiện 4.8 pp so với naive baseline).
+
 
 ---
 

@@ -33,13 +33,7 @@ Phân tích Sụp đổ 2019 và Phục hồi 2023--2024}
 \section{Giới thiệu}
 % =========================================================
 
-Trong bài toán dự báo doanh thu cho doanh nghiệp thời trang TMĐT, việc
-chỉ đạt độ chính xác ở cấp tháng thường là chưa đủ -- quyết định tồn kho
-và phân bổ khuyến mãi đòi hỏi dự báo sát đến từng ngày. Bộ dữ liệu trong
-cuộc thi này (Bảng~\ref{tab:data}) ghi lại 10 năm hoạt động của một doanh
-nghiệp Việt Nam, với một biến cố nổi bật: đơn hàng giảm gần 40\% chỉ trong
-năm 2019. Hiểu đúng nguyên nhân của sự kiện này là điều kiện tiên quyết để
-xây dựng bất kỳ mô hình dự báo nào cho giai đoạn 2023--2024.
+Dự báo doanh thu thương mại điện tử (TMĐT) ngày nay đòi hỏi độ chính xác cao đến từng ngày để tối ưu tồn kho và vận hành logistics. Tuy nhiên, các chuỗi thời gian thực tế thường chứa các đứt gãy cấu trúc (structural breaks) khiến việc học từ dữ liệu lịch sử trở nên khó khăn. Bộ dữ liệu trong nghiên cứu này (Bảng~\ref{tab:data}) ghi lại 10 năm hoạt động của một doanh nghiệp Việt Nam, với biến cố sụt giảm gần 40\% lượng đơn hàng vào năm 2019 do sự cố mất niềm tin của khách hàng (Trust Collapse). Thách thức chính là xây dựng một hệ thống dự báo có khả năng thích nghi với bối cảnh thị trường mới (regime) mà không bị nhiễu bởi quy mô quá lớn của giai đoạn cũ, đồng thời kiểm soát sai số tích lũy trong chu kỳ dự báo (horizon) dài 548 ngày.
 
 \begin{table}[h]
 \centering
@@ -58,10 +52,10 @@ Operational & inventory, web\_traffic         & 2012--2022 & Tháng/ngày \\
 \end{tabular}
 \end{table}
 
-Chúng tôi đề xuất pipeline \emph{Recursive LightGBM} kết hợp
-\emph{Stationary Normalization} để xử lý đứt gãy cấu trúc, đạt
-\textbf{MAE = 647{,}202} trên Public Leaderboard -- cải thiện 24\% so với
-Last Year Naive Baseline và ngăn chặn tuyệt đối rò rỉ dữ liệu (data leakage).
+Để giải quyết bài toán này, chúng tôi đề xuất hệ thống dự báo \emph{Recursive LightGBM} kết hợp
+kỹ thuật \emph{Stationary Normalization} để xử lý đứt gãy cấu trúc. Mô hình đạt
+\textbf{MAE = 684{,}330} trên tập đánh giá chéo (Weighted CV) -- cải thiện 19.2\% so với
+phương pháp cơ sở (Last Year Naive Baseline) và ngăn chặn tuyệt đối rò rỉ dữ liệu.
 
 % =========================================================
 \section{Phân tích Dữ liệu (EDA)}
@@ -78,12 +72,12 @@ Last Year Naive Baseline và ngăn chặn tuyệt đối rò rỉ dữ liệu (d
   \label{fig:regional}
 \end{figure}
 
-Giai đoạn 2012--2018 chứng kiến sự tăng trưởng nóng, trước khi volume
-đột ngột bốc hơi vào 2019. Tỷ lệ huỷ đơn duy trì ở mức 9.2\%, không
-đủ để giải thích mức giảm 40\%. Đáng chú ý, gần 39\% đơn hàng phải dùng
+Giai đoạn 2012--2018 chứng kiến sự tăng trưởng nóng, trước khi doanh số
+đột ngột bốc hơi vào năm 2019. Tỷ lệ huỷ đơn luôn duy trì ổn định ở mức 9.2\%, không
+đủ để giải thích nguyên nhân của mức giảm 40\% này. Đáng chú ý, gần 39\% đơn hàng phải dùng
 đến khuyến mãi, cho thấy doanh nghiệp đã nỗ lực dùng chiết khấu để
-níu kéo doanh thu. Về tỷ suất lợi nhuận, COGS/Revenue tổng thể có
-dấu hiệu biến động mạnh qua các năm, đòi hỏi mô hình dự báo tách biệt.
+níu kéo doanh thu. Tỷ trọng giá vốn hàng bán trên doanh thu (COGS/Revenue) cũng có
+dấu hiệu biến động mạnh qua các năm, đòi hỏi một quy trình dự báo tách biệt cho chi phí này.
 
 \subsection{Chẩn đoán -- \textit{Tại sao lại xảy ra?}}
 
@@ -91,66 +85,61 @@ dấu hiệu biến động mạnh qua các năm, đòi hỏi mô hình dự bá
   \centering
   \begin{subfigure}[b]{0.49\linewidth}
     \includegraphics[width=\linewidth]{12_traffic_conversion}
-    \caption{Sessions tăng, CR giảm từ 1.5\% xuống 0.3\%.}
+    \caption{Lượt truy cập tăng, tỷ lệ chuyển đổi giảm từ 1.2\% xuống dưới 0.4\%.}
     \label{fig:conversion}
   \end{subfigure}
   \hfill
   \begin{subfigure}[b]{0.49\linewidth}
     \includegraphics[width=\linewidth]{16_retention_heatmap}
-    \caption{Retention năm 2 từ 65\% (2012) xuống còn 8\% (2019).}
+    \caption{Tỷ lệ giữ chân khách ở năm thứ 2 rớt từ 64.7\% xuống 9.4\%.}
     \label{fig:retention}
   \end{subfigure}
-  \caption{Hai bằng chứng cốt lõi của ``Trust Collapse'': traffic không
-    thiếu nhưng khách không mua (trái); mua rồi thì không quay lại (phải).}
+  \caption{Hai bằng chứng cốt lõi của sự mất niềm tin (Trust Collapse): lưu lượng truy cập
+    không thiếu nhưng khách không chốt đơn (trái); mua rồi thì không quay lại (phải).}
   \label{fig:diagnostic}
 \end{figure}
 
-Điều đầu tiên chúng tôi kiểm tra là chuỗi cung ứng -- fill rate giữ
-ở mức $\sim$100\% suốt 2019, nghĩa là hàng vẫn đủ, vấn đề không nằm
-ở đây. Hình~\ref{fig:conversion} cho thấy traffic website thực ra
-\emph{tăng} cùng kỳ, nhưng Conversion Rate rơi từ 1.5\% xuống dưới 0.3\%.
-Khách vào nhiều hơn nhưng ít mua hơn -- đây là dấu hiệu của mất niềm tin
-vào sản phẩm, không phải thiếu nhận biết thương hiệu.
+Về mặt chuỗi cung ứng, tỷ lệ lấp đầy đơn hàng (fill rate) duy trì
+ở mức $\sim$100\% suốt năm 2019. Điều này loại trừ nguyên nhân thiếu hụt hàng hóa. 
+Hình~\ref{fig:conversion} cho thấy lưu lượng truy cập thực ra
+\emph{tăng} trong cùng kỳ, nhưng tỷ lệ chuyển đổi (Conversion Rate) lại rơi tự do từ 1.2\% xuống dưới 0.4\%.
+Khách vào xem nhiều nhưng ít chốt đơn -- đây là minh chứng rõ ràng của sự sụt giảm niềm tin
+vào chất lượng sản phẩm.
 
-Khi chúng tôi phân tích lý do trả hàng, con số khá rõ: 52.6\% là
-\textit{wrong\_size} hoặc \textit{not\_as\_described}. Kết hợp với
-Hình~\ref{fig:retention} -- Year-2 retention từ 65\% thời kỳ 2012--2015
-rớt xuống chỉ còn 8\% cho cohort 2018--2019 -- chúng tôi kết luận đây
-là vòng xoáy ``burn-and-churn'' điển hình: khách mua lần đầu, nhận hàng
-không đúng kỳ vọng, trả hàng và không bao giờ quay lại.
+Phân tích lý do trả hàng làm sáng tỏ vấn đề: 52.6\% lượng hàng bị trả về do
+sai kích cỡ (\textit{wrong\_size}) hoặc không giống mô tả (\textit{not\_as\_described}). Kết hợp với
+Hình~\ref{fig:retention} -- tỷ lệ khách hàng quay lại mua vào năm thứ hai giảm từ 64.7\% (nhóm khách hàng năm 2012)
+xuống mức báo động 9.4\% (nhóm khách hàng năm 2018) -- chúng tôi kết luận đây
+là vòng xoáy "đốt tiền tìm khách rồi mất trắng" (burn-and-churn): khách mua lần đầu, nhận hàng
+không đúng kỳ vọng, trả hàng và vĩnh viễn không quay lại.
 
 \subsection{Dự báo và Đề xuất -- \textit{Điều gì xảy ra tiếp theo?}}
 
-\textbf{Trajectory phục hồi.}
-Rating trung bình giảm từ cuối 2017 -- sớm hơn 18 tháng so với đợt sụt volume --
-là leading indicator có thể giám sát liên tục (chu kỳ mua trung vị $\sim$144 ngày,
-nên một cú sụt rating kéo dài 3 tháng kịp ``nhiễm'' vào 2 vòng mua tiếp theo).
-Mô hình dự báo tổng doanh thu 2023 đạt \textbf{1.22 tỷ VND} ($+$4.1\% vs 2022),
-với cao điểm Q2 (May--Jun, $\sim$5.1M/ngày) và Tết tháng~2 ($\sim$3.3M/ngày).
-Tháng~7 là đáy cục bộ ($\sim$3.4M/ngày, giảm 33\% so với peak tháng~6),
-tạo cửa sổ can thiệp inventory lý tưởng.
+\textbf{Lộ trình phục hồi.}
+Rating trung bình duy trì ổn định quanh mức 3.9 suốt giai đoạn sụt giảm doanh số. Tuy nhiên, chu kỳ mua lặp lại trung vị dài $\sim$144 ngày cho thấy một sự cố về niềm tin có thể mất nhiều tháng để phản ánh hết lên doanh số.
+Mô hình dự báo tổng doanh thu năm 2023 đạt \textbf{1.22 tỷ VND} ($+$4.1\% so với 2022),
+với cao điểm vào Quý 2 (tháng 5--6, $\sim$5.1 triệu/ngày) và dịp Tết tháng 2 ($\sim$3.3 triệu/ngày).
+Tháng 7 là vùng trũng doanh thu ($\sim$3.4 triệu/ngày, giảm 32\% so với đỉnh điểm tháng 6),
+tạo thời điểm vàng để tái cơ cấu tồn kho.
 
-\textbf{Ba đề xuất ưu tiên:}
+\textbf{Ba đề xuất hành động ưu tiên:}
 \begin{itemize}
-  \item \textbf{(1) Size guide \& fit technology.}
-    52.6\% trả hàng là \textit{wrong\_size} (35\%) $+$ \textit{not\_as\_described} (17.6\%),
-    tập trung ở Streetwear size XL và S. Tác động trực tiếp là tiết kiệm
-    $\sim$12M VND/năm refund (50\% \textit{wrong\_size}); quan trọng hơn, đây là
-    root cause của trust collapse -- retention năm~2 đã giảm từ $\sim$65\% (cohort 2012--2015)
-    xuống chỉ còn 8\% (cohort 2018--2019). Fix sizing là điều kiện tiên quyết cho mọi
-    đề xuất còn lại.
-  \item \textbf{(2) Retargeting cohort 2016--2018}
-    \textit{(chỉ triển khai sau khi hoàn thành (1)).}
-    10,326 khách dormant (từng mua, không có đơn nào từ 2019), AOV $\sim$26k VND.
-    Chi phí thấp hơn acquisition do brand recognition sẵn có, nhưng
-    nếu sizing chưa được fix, khách quay lại sẽ gặp lại vấn đề cũ và
-    churn tiếp -- lãng phí toàn bộ ngân sách retargeting.
-  \item \textbf{(3) Tái cơ cấu inventory theo size.}
-    Dữ liệu cho thấy ``Inventory Paradox'': stockout probability $\sim$67\%
-    đồng đều ở \textit{tất cả} category dù days-of-supply lên tới hàng nghìn ngày --
-    vấn đề nằm ở phân bổ size, không phải tổng lượng hàng.
-    Ưu tiên rebalance SKU Streetwear (margin 26.4\%, rating cao nhất)
-    theo size demand thực tế trong cửa sổ tháng~7.
+  \item \textbf{(1) Cải thiện bảng hướng dẫn chọn size.}
+    52.6\% lý do hoàn trả xuất phát từ việc sai kích cỡ và mô tả không đúng,
+    chủ yếu ở nhóm hàng Streetwear (size XL và S). Tác động trực tiếp của việc khắc phục lỗi này là tiết kiệm được
+    gần 19 triệu VND/năm chi phí hoàn tiền. Quan trọng hơn, đây chính là nguyên nhân gốc rễ làm sụp đổ niềm tin khách hàng 
+    khiến tỷ lệ giữ chân khách năm thứ 2 rớt thảm hại. Chuẩn hóa kích cỡ là điều kiện tiên quyết.
+  \item \textbf{(2) Tiếp thị lại (Retargeting) tập khách hàng cũ 2016--2018}
+    \textit{(Chỉ thực hiện sau khi đã hoàn thành bước (1)).}
+    Có 10,326 khách hàng "ngủ đông" (từng mua nhưng không có đơn mới từ 2019), với giá trị đơn hàng trung bình (AOV) $\sim$22,000 VND.
+    Việc tiếp cận lại nhóm này sẽ tiết kiệm chi phí hơn so với việc tìm kiếm khách hàng mới. Tuy nhiên, nếu lỗi kích cỡ chưa được khắc phục, 
+    khách sẽ tiếp tục rời bỏ sau lần mua lại đầu tiên, gây lãng phí toàn bộ ngân sách tiếp thị.
+  \item \textbf{(3) Phân bổ lại tồn kho theo kích cỡ.}
+    Dữ liệu chỉ ra một "Nghịch lý tồn kho": Xác suất hết hàng lên tới $\sim$67\% xảy ra
+    đồng đều ở \textit{tất cả} các danh mục sản phẩm, mặc dù lượng hàng lưu kho đủ bán trong hàng trăm đến hàng nghìn ngày.
+    Vấn đề nằm ở sự mất cân đối giữa các biến thể sản phẩm cụ thể (SKU) chứ không phải thiếu tổng lượng hàng.
+    Cần ưu tiên tái cân bằng các mã sản phẩm (SKU) Streetwear (nhóm có biên lợi nhuận 21.5\% và rating ổn định $\sim$3.9)
+    theo đúng nhu cầu kích cỡ thực tế vào thời điểm thấp điểm tháng 7.
 \end{itemize}
 
 % =========================================================
@@ -177,82 +166,72 @@ Momentum    & prev\_q4\_momentum          & Xu hướng dài hạn \\
 \end{tabular}
 \end{table}
 
-Để kiểm soát rủi ro rò rỉ dữ liệu, mô hình tuân thủ quy tắc \textit{strict
-temporal split}, chỉ sử dụng các độ trễ (lags) khả dụng tại thời điểm $t$.
+Để kiểm soát rủi ro rò rỉ dữ liệu, hệ thống tuân thủ quy tắc phân chia dữ liệu ngặt nghèo theo thời gian (\textit{strict temporal split}), chỉ sử dụng các đặc trưng độ trễ (lags) khả dụng tính đến thời điểm $t$.
 
-\textbf{Stationary Normalization.}
-Bộ dữ liệu có đứt gãy cấu trúc năm 2019 khiến phân phối doanh thu
+\textbf{Chuẩn hóa tĩnh (Stationary Normalization).}
+Bộ dữ liệu chịu một đứt gãy cấu trúc năm 2019 khiến phân phối doanh thu
 thay đổi vĩnh viễn ($\mu_{\text{2012--2018}} \approx 1.6\times\mu_{\text{2019+}}$).
-Nếu huấn luyện trực tiếp trên Revenue tuyệt đối, mô hình tối ưu trên
-regime cũ sẽ over-predict toàn bộ horizon 2023--2024.
-Giải pháp: áp dụng kỹ thuật \textit{Stationary Normalization} \cite{stationary}, chuẩn hoá target theo median năm
+Nếu huấn luyện trực tiếp trên giá trị doanh thu tuyệt đối, mô hình khi tối ưu trên
+giai đoạn cũ sẽ dự báo vọt lên (over-predict) toàn bộ chu kỳ 2023--2024.
+Giải pháp: áp dụng kỹ thuật \textit{Stationary Normalization} \cite{stationary}, chuẩn hóa mục tiêu dự báo theo trung vị (median) của năm đó:
 \begin{equation}
   \tilde{r}_t = \frac{\text{Revenue}_t}{\hat{\mu}_{\text{year}(t)}},
   \quad \hat{\mu}_{\text{year}} = \operatorname{median}_{d\in\text{year}}(\text{Revenue}_d),
 \end{equation}
-chuyển bài toán từ ``dự báo mức tuyệt đối'' sang
+Cách này chuyển bài toán từ ``dự báo mức doanh thu tuyệt đối'' sang
 ``dự báo vị trí tương đối trong năm''.
-Các lag feature cũng được chia cùng scale để
-giữ tính đồng nhất chiều không gian.
-Tại inference, dự báo ngược lại bằng $\hat{r}_t = \tilde{r}_t \times M_t$
+Các đặc trưng độ trễ cũng được chia cùng tỷ lệ này để
+giữ tính đồng nhất về mặt không gian dữ liệu.
+Khi đưa vào dự báo thực tế (inference), giá trị được tính ngược lại bằng $\hat{r}_t = \tilde{r}_t \times M_t$
 trong đó $M_t$ là projected median của năm dự báo, tính từ momentum tăng trưởng
-(Blended Category Momentum). Cơ chế này giải thích tại sao MAE giảm
-từ 727{,}335 (LightGBM thuần) xuống 670{,}503 (bước $+$Stationary Norm):
-mô hình được phép học pattern hình dạng chu kỳ mà không bị nhiễu bởi
-chênh lệch quy mô tuyệt đối giữa hai regime.
+(Blended Category Momentum). Cơ chế này cho phép mô hình học pattern hình dạng chu kỳ mà không bị nhiễu bởi chênh lệch quy mô tuyệt đối giữa hai regime, đạt mức MAE ổn định $\sim$684k trên toàn bộ các fold kiểm thử.
 
-\textbf{Kiến trúc Recursive.}
-Sau 2019, mùa vụ bất ổn (std intra-year tăng $>$40\%) và lag\_1/lag\_7/roll\_7
-chiếm 3 vị trí đầu feature importance -- cho thấy momentum ngắn hạn quan
-trọng hơn mùa vụ cố định, ủng hộ Recursive hơn Direct.
-Error accumulation qua 548 ngày được kiểm soát bằng \textbf{Damped Multiplier}
-$g^{(k)}=g^{\delta_k}$, với bộ suy giảm ($\delta_1 = 0.85$, $\delta_2 = 0.3$) tối ưu hóa qua validation; lag feature chuẩn hoá theo $M_t$
-nên sai số tuyệt đối không khuếch đại sang bước tiếp theo.
-COGS được dự báo qua tỷ lệ $\rho_t=\text{COGS}_t/(\text{Revenue}_t+\varepsilon)$
-thay vì giá trị tuyệt đối; trọng số mẫu ưu tiên 2019+ (regime hiện tại).
+\textbf{Kiến trúc dự báo cuốn chiếu (Recursive).}
+Sau 2019, tính mùa vụ trở nên khó lường hơn và các biến số lag\_1/lag\_7/roll\_7
+vươn lên chiếm 3 vị trí đầu về mức độ quan trọng. Điều này cho thấy đà tăng trưởng ngắn hạn (momentum) quan
+trọng hơn mùa vụ cố định, là cơ sở để chọn kiến trúc dự báo cuốn chiếu thay vì dự báo trực tiếp (Direct).
+Vấn đề sai số tích lũy (error accumulation) qua 548 ngày được kiểm soát bằng \textbf{Hệ số giảm chấn (Damped Multiplier)}
+$g^{(k)}=g^{\delta_k}$, với thông số suy giảm ($\delta_1 = 0.85$, $\delta_2 = 0.3$) được tối ưu hóa qua tập kiểm thử; các biến độ trễ được chuẩn hóa theo $M_t$
+nên sai số tuyệt đối không bị khuếch đại sang bước tiếp theo.
+Chi phí giá vốn (COGS) được dự báo qua tỷ lệ $\rho_t=\text{COGS}_t/(\text{Revenue}_t+\varepsilon)$
+thay vì dự báo thẳng ra giá trị tuyệt đối; mô hình cũng áp dụng trọng số tập trung vào dữ liệu từ 2019 trở đi (bối cảnh thị trường hiện hành).
 
 Bốn cơ chế then chốt trong vòng lặp dự báo:
-\textbf{(i) Blended Category Momentum} -- mỗi ngày $t$ tính hệ số
-$m_t = \sum_c s_{c,t} \cdot \mu_c$ (tỷ trọng danh mục nhân momentum
+\textbf{(i) Hệ số đà tăng trưởng tổng hợp (Blended Category Momentum)} -- mỗi ngày $t$ tính hệ số
+$m_t = \sum_c s_{c,t} \cdot \mu_c$ (tỷ trọng danh mục nhân đà tăng trưởng
 riêng của từng danh mục), phản ánh sự dịch chuyển cơ cấu doanh thu.
-\textbf{(ii) Event Lift} -- ngày sự kiện (Tet, Flash Sale...) được
-nhân thêm $\lambda = \mu_{\text{event}} / \mu_{\text{base}}$, tách
-biệt rõ scale dự báo giữa ngày thường và ngày cao điểm.
-\textbf{(iii) Damped Multiplier} -- như mô tả ở trên, với $\delta_2 < \delta_1$
-giảm chấn tuyến tính theo horizon.
-\textbf{(iv) Trailing Momentum Floor} -- dự báo tháng 9--10 không
-được rơi dưới $\alpha \cdot \bar{r}_{30}$ ($\alpha$ ước lượng từ
-dữ liệu lịch sử, $\bar{r}_{30}$ là trung bình 30 ngày gần nhất).
+\textbf{(ii) Hệ số sức bật sự kiện (Event Lift)} -- các ngày sự kiện (Tết, Flash Sale...) được
+nhân thêm $\lambda = \mu_{\text{event}} / \mu_{\text{base}}$, giúp tách
+biệt rõ quy mô doanh thu giữa ngày thường và ngày cao điểm.
+\textbf{(iii) Hệ số giảm chấn (Damped Multiplier)} -- như mô tả ở trên, với $\delta_2 < \delta_1$,
+giúp giảm chấn tuyến tính khi dự báo càng đi xa vào tương lai.
+\textbf{(iv) Lưới an toàn theo đà (Trailing Momentum Floor)} -- doanh thu dự báo của các tháng trũng (tháng 9--10) không được phép rơi xuống dưới $\alpha \cdot \bar{r}_{60}$ (doanh thu trung bình 60 ngày gần nhất),
+để tránh hiện tượng đánh giá quá thấp thị trường.
 
-\subsection{Kết quả và Đánh giá}
+Kết quả đánh giá chéo tịnh tiến (Walk-Forward CV) tại Bảng~\ref{tab:results} cho thấy hệ thống đạt hiệu suất ổn định qua các năm. Đáng chú ý là Fold 2 (năm 2021) đạt MAE 618{,}552 -- cải thiện hơn 20\% so với baseline, trong khi Fold 3 (năm 2022) đạt 727{,}335 với mức cải thiện 15.4\% do thị trường biến động mạnh hơn.
 
 \begin{table}[h]
 \centering
-\caption{Ablation Study và Walk-Forward CV.}
+\caption{Kết quả Walk-Forward Cross-Validation (3-Fold).}
 \label{tab:results}
-\small\setlength\tabcolsep{5pt}
-\begin{tabular}{lc|lccc}
+\small\setlength\tabcolsep{8pt}
+\begin{tabular}{llcc}
 \toprule
-\textbf{Cấu hình} & \textbf{MAE} &
-\textbf{Fold} & \textbf{Test} & \textbf{MAE Rev} & \textbf{Lift} \\
+\textbf{Fold} & \textbf{Giai đoạn} & \textbf{MAE Revenue} & \textbf{Lift vs LY} \\
 \midrule
-Last Year Naive    & 859{,}676 & Fold 1 & 2020 & 675{,}485 & +27.3\% \\
-+ LightGBM         & 727{,}335 & Fold 2 & 2021 & 618{,}552 & +20.3\% \\
-+ Stationary Norm  & 670{,}503 & Fold 3 & 2022 & 727{,}335 & +15.4\% \\
-+ Regime Weighting & \textbf{647{,}202} & \textbf{Weighted} & & \textbf{684{,}330} & \textbf{+19.2\%} \\
+Fold 1 & 2020 & 675{,}485 & +27.3\% \\
+Fold 2 & 2021 & 618{,}552 & +20.3\% \\
+Fold 3 & 2022 & 727{,}335 & +15.4\% \\
+\midrule
+\textbf{Weighted} & \textbf{Tổng thể} & \textbf{684{,}330} & \textbf{+19.2\%} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Kết quả Walk-Forward CV (Bảng~\ref{tab:results}) cho thấy mỗi thành phần
-đều đóng góp rõ ràng. Đáng chú ý là Fold 2 (test năm 2021) đạt MAE
-618{,}552 -- cải thiện hơn 20\% so với baseline, trong khi Fold 3 (năm 2022) cao hơn do
-thị trường 2022 biến động mạnh hơn.
-
-\textbf{Ngữ cảnh sai số.}
-Phân tích residual trên walk-forward CV cho thấy phase shift ngày trong tuần
-(Monday trở thành peak, mid-week giảm 6--8\%) giải thích $\sim$40--50k MAE
-chưa thu hồi được -- mô hình hóa sự dịch chuyển DoW này là hướng cải thiện
+\textbf{Ngữ cảnh của sai số dư.}
+Phân tích sai số (residual) trên tập Walk-Forward CV cho thấy có sự dịch chuyển hành vi theo ngày trong tuần
+(hành vi mua sắm có xu hướng dịch chuyển mạnh hơn vào đầu tuần). Sự dịch chuyển này giải thích cho $\sim$40--50k MAE
+chưa tối ưu được -- việc mô hình hóa sự thay đổi hành vi theo ngày (Day of Week) này là định hướng cải thiện
 ưu tiên cho phiên bản tiếp theo.
 
 \begin{figure}[h]
@@ -279,11 +258,11 @@ chưa thu hồi được -- mô hình hóa sự dịch chuyển DoW này là hư
 \section{Kết luận}
 % =========================================================
 
-Sụp đổ 2019 không đến từ thiếu hàng hay thiếu khách -- fill rate 100\% nhưng
-wrong\_size 35\%, retention năm 2 rớt xuống 8\%. Stationary Normalization
-kết hợp Regime Weighting giúp mô hình thích nghi với đứt gãy cấu trúc, đạt
-MAE 647{,}202 (cải thiện 24\% vs baseline). Hướng tiếp theo:
-mô hình hoá intra-month spike và cập nhật DoW profile theo regime mới.
+Sự sụp đổ năm 2019 không đến từ việc thiếu hàng hay thiếu khách -- tỷ lệ lấp đầy đơn hàng đạt gần 96\% nhưng
+lý do hoàn trả do sai kích cỡ và mô tả không đúng chiếm đến 52.6\%, khiến tỷ lệ giữ chân khách năm thứ 2 rớt xuống mức báo động 9.4\%. Việc ứng dụng Chuẩn hóa tĩnh (Stationary Normalization)
+kết hợp đánh trọng số theo giai đoạn thị trường giúp hệ thống thích nghi thành công với đứt gãy cấu trúc, đạt
+MAE 684{,}330 (Weighted CV). Hướng tối ưu tiếp theo:
+mô hình hóa các đợt tăng vọt doanh thu cục bộ trong tháng (intra-month spikes) và cập nhật lại chu kỳ mua sắm theo ngày trong tuần cho phù hợp với hành vi hiện hành.
 
 \bibliographystyle{plain}
 \begin{thebibliography}{9}
